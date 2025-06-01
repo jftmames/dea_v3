@@ -1,116 +1,49 @@
-# ── src/results.py ──
+# results.py
 
-import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
-
+import pandas as pd
 
 def plot_efficiency_histogram(dea_df: pd.DataFrame, bins: int = 20):
-    """
-    Dibuja un histograma de la columna 'efficiency' del DataFrame de resultados DEA.
-    """
-    # Asegurarse de que 'efficiency' exista y sea numérico
-    if "efficiency" not in dea_df.columns:
-        raise ValueError("La columna 'efficiency' no existe en el DataFrame.")
-    df = dea_df.copy()
-    df["efficiency"] = pd.to_numeric(df["efficiency"], errors="coerce")
-
-    fig = px.histogram(
-        df,
-        x="efficiency",
-        nbins=bins,
-        title="Distribución de Eficiencias DEA",
-        labels={"efficiency": "Eficiencia"},
-    )
-    fig.update_layout(
-        xaxis_title="Eficiencia",
-        yaxis_title="Conteo de DMU",
-        bargap=0.1,
-    )
+    fig = px.histogram(dea_df, x="efficiency", nbins=bins, title="Distribución de Eficiencias")
+    fig.update_layout(xaxis_title="Eficiencia", yaxis_title="Cantidad de DMU")
     return fig
 
-
 def plot_3d_inputs_outputs(
-    original_df: pd.DataFrame,
+    df_original: pd.DataFrame,
     inputs: list[str],
     outputs: list[str],
     dea_df: pd.DataFrame,
 ):
     """
-    Genera un scatter 3D coloreado por eficiencia.
-    - Usa los dos primeros inputs en los ejes X e Y.
-    - Usa el primer output en el eje Z.
-    - Colorea por la eficiencia calculada.
+    Genera un scatter 3D:
+      - Ejes X e Y: los dos primeros inputs
+      - Eje Z: primer output
+      - Color: eficiencia
+    Requiere al menos 2 inputs y 1 output.
     """
-    # Validaciones mínimas
-    if len(inputs) < 2:
-        raise ValueError("Se necesitan al menos 2 columnas de Inputs para el Scatter 3D.")
-    if len(outputs) < 1:
-        raise ValueError("Se necesita al menos 1 columna de Output para el Scatter 3D.")
-    if "DMU" not in dea_df.columns:
-        raise ValueError("El DataFrame de DEA debe contener la columna 'DMU'.")
-    if "efficiency" not in dea_df.columns:
-        raise ValueError("El DataFrame de DEA debe contener la columna 'efficiency'.")
-
+    if len(inputs) < 2 or len(outputs) < 1:
+        raise ValueError("Se necesitan al menos 2 Inputs y 1 Output para el Scatter 3D.")
     # Tomamos los dos primeros inputs y el primer output
-    x_col = inputs[0]
-    y_col = inputs[1]
+    x_col, y_col = inputs[0], inputs[1]
     z_col = outputs[0]
 
-    # Hacemos merge entre el df original y dea_df para tener los valores de inputs/outputs junto a 'efficiency'
-    # Antes, nos aseguramos de que ambas tablas tengan la columna 'DMU'
-    df_orig = original_df.copy()
-    df_orig["DMU"] = df_orig["DMU"].astype(str) if "DMU" in df_orig.columns else df_orig.index.astype(str)
-    dea_copy = dea_df.copy()
-    dea_copy["DMU"] = dea_copy["DMU"].astype(str)
-
-    merged = pd.merge(
-        dea_copy[["DMU", "efficiency"]],
-        df_orig[[x_col, y_col, z_col, "DMU"]],
+    # Merge dea_df con df_original para tener eficiencia junto a inputs/outputs
+    df_plot = dea_df.merge(
+        df_original[[x_col, y_col, z_col] + (["DMU"] if "DMU" in df_original.columns else [])],
         on="DMU",
-        how="inner"
+        how="left"
     )
 
-    # Forzamos numérico en las columnas de interés
-    merged[x_col] = pd.to_numeric(merged[x_col], errors="coerce")
-    merged[y_col] = pd.to_numeric(merged[y_col], errors="coerce")
-    merged[z_col] = pd.to_numeric(merged[z_col], errors="coerce")
-    merged["efficiency"] = pd.to_numeric(merged["efficiency"], errors="coerce")
-
-    # Eliminar filas con NaN en cualquiera de esas columnas
-    merged = merged.dropna(subset=[x_col, y_col, z_col, "efficiency"])
-
-    if merged.empty:
-        raise ValueError("No hay datos válidos para dibujar el Scatter 3D.")
-
-    # Crear el scatter 3D
     fig = px.scatter_3d(
-        merged,
+        df_plot,
         x=x_col,
         y=y_col,
         z=z_col,
         color="efficiency",
         hover_name="DMU",
-        title=f"Scatter 3D: {x_col} vs {y_col} vs {z_col} (coloreado por eficiencia)",
-        color_continuous_scale="Viridis",
-        labels={
-            x_col: x_col,
-            y_col: y_col,
-            z_col: z_col,
-            "efficiency": "Eficiencia"
-        }
-    )
-    fig.update_traces(marker=dict(size=5))
-    fig.update_layout(
-        scene=dict(
-            xaxis_title=x_col,
-            yaxis_title=y_col,
-            zaxis_title=z_col,
-        ),
-        margin=dict(l=0, r=0, b=0, t=30),
+        title=f"Scatter 3D: {x_col} vs {y_col} vs {z_col}"
     )
     return fig
-
 
 def plot_benchmark_spider(
     merged_df: pd.DataFrame,
@@ -119,68 +52,43 @@ def plot_benchmark_spider(
     outputs: list[str],
 ):
     """
-    Genera un gráfico tipo spider (radar) comparando la DMU seleccionada
-    contra el máximo valor entre todas las DMU para cada variable de input/output.
-    - merged_df debe contener al menos las columnas: 'DMU', cada input y cada output.
+    Crea un gráfico de radar/spider comparando la DMU seleccionada contra peers eficientes.
+    merged_df debe contener: 'DMU', 'efficiency', todos los inputs y outputs.
     """
-    # Validaciones mínimas
-    if "DMU" not in merged_df.columns:
-        raise ValueError("El DataFrame debe tener la columna 'DMU'.")
-    if selected_dmu not in merged_df["DMU"].astype(str).values:
-        raise ValueError(f"La DMU '{selected_dmu}' no existe en el DataFrame.")
-    if len(inputs) + len(outputs) < 1:
-        raise ValueError("Se necesita al menos un Input u Output para Spider.")
-
-    # Filtrar solo los valores numéricos de inputs+outputs
-    # y normalizarlos en [0, 1] usando como referencia el máximo global
-    df_num = merged_df.copy()
-    df_num["DMU"] = df_num["DMU"].astype(str)
-
-    # Calcular valores máximos para cada variable (inputs+outputs)
-    max_vals = {}
-    for col in inputs + outputs:
-        df_num[col] = pd.to_numeric(df_num[col], errors="coerce")
-        max_vals[col] = df_num[col].max(skipna=True)
-        if pd.isna(max_vals[col]) or max_vals[col] == 0:
-            max_vals[col] = 1  # evitar división por cero
-
-    # Extraer valores de la DMU seleccionada
-    row = df_num.loc[df_num["DMU"] == selected_dmu]
+    # Encontrar la fila de la DMU seleccionada
+    row = merged_df[merged_df["DMU"] == selected_dmu]
     if row.empty:
-        raise ValueError(f"No se encontró la fila para '{selected_dmu}' en el DataFrame.")
+        raise ValueError(f"DMU '{selected_dmu}' no encontrada en merged_df.")
 
-    # Preparar lista de categorías y valores normalizados
-    categories = []
-    values = []
-    for col in inputs + outputs:
-        categories.append(col)
-        val = row[col].iloc[0]
-        try:
-            norm_val = float(val) / float(max_vals[col])
-        except Exception:
-            norm_val = 0
-        values.append(norm_val)
+    # Extraemos valores de inputs y outputs para la DMU seleccionada
+    values_selected = row[inputs + outputs].iloc[0].values.tolist()
 
-    # Radar espera valores “cerrados”, es decir, repetir el primer valor al final
-    categories_closed = categories + [categories[0]]
-    values_closed = values + [values[0]]
+    # Tomamos solo peers eficientes (efficiency == 1)
+    peers = merged_df[merged_df["efficiency"] == 1]
+    if peers.empty:
+        raise ValueError("No hay peers eficientes para comparar.")
 
-    fig = go.Figure(
-        data=[
-            go.Scatterpolar(
-                r=values_closed,
-                theta=categories_closed,
-                fill="toself",
-                name=f"DMU: {selected_dmu}",
-                marker=dict(symbol="circle")
-            )
-        ]
+    # Calculamos el promedio de inputs/outputs de los peers
+    peers_avg = peers[inputs + outputs].mean().tolist()
+
+    categories = inputs + outputs
+
+    # Para radar, necesitamos repetir el primer valor al final
+    values_sel = values_selected + [values_selected[0]]
+    values_peer = peers_avg + [peers_avg[0]]
+    categories_cycle = categories + [categories[0]]
+
+    fig = px.line_polar(
+        r=values_sel,
+        theta=categories_cycle,
+        line_close=True,
+        name=selected_dmu,
+        title=f"Benchmark Spider: {selected_dmu} vs Peers eficientes"
     )
-    fig.update_layout(
-        polar=dict(
-            radialaxis=dict(visible=True, range=[0, 1]),
-        ),
-        title=f"Benchmark Spider: {selected_dmu}",
-        showlegend=False,
+    fig.add_scatterpolar(
+        r=values_peer,
+        theta=categories_cycle,
+        line_close=True,
+        name="Peers Promedio"
     )
     return fig
