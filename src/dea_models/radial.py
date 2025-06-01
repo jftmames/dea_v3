@@ -148,8 +148,9 @@ def run_ccr(
     Ejecuta CCR radial y retorna DataFrame con columnas:
       DMU, tec_efficiency_ccr, lambda_vector, slacks_inputs, slacks_outputs, rts_label
     """
+    # ← Inserta esta línea
     if dmu_column not in df.columns:
-        raise ValueError(f"La columna DMU '{dmu_column}' no existe.")
+        raise ValueError(f"La columna DMU '{dmu_column}' no existe en el DataFrame.")
 
     # Validar que todos los inputs y outputs sean positivos
     cols = input_cols + output_cols
