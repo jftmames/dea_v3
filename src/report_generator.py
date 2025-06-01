@@ -1,4 +1,5 @@
-# ---------- src/report_generator.py ----------
+# src/report_generator.py
+
 import pandas as pd
 import datetime
 
