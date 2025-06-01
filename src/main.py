@@ -145,3 +145,16 @@ if "res_df" in st.session_state:
             st.plotly_chart(to_plotly_tree(tree), use_container_width=True)
             with st.expander("JSON completo"):
                 st.json(tree)
+from epistemic_metrics import compute_eee
+
+# … dentro del bloque “Crear árbol” …
+with st.spinner("Generando árbol…"):
+    tree = generate_inquiry( … )
+
+st.plotly_chart(to_plotly_tree(tree), use_container_width=True)
+with st.expander("JSON completo"):
+    st.json(tree)
+
+# --- Cálculo y visualización del EEE ---
+eee_score = compute_eee(tree, depth_limit=depth, breadth_limit=breadth)
+st.metric(label="Índice de Equilibrio Erotético (EEE)", value=eee_score)
