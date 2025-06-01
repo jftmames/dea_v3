@@ -65,6 +65,9 @@ from inquiry_engine import generate_inquiry, to_plotly_tree
 
 # … después de calcular res_df …
 
+# ------------------------------------------------------------------
+# 4. Complejos de Indagación
+# ------------------------------------------------------------------
 if "res_df" in st.session_state:
     ineff_df = st.session_state["res_df"].query("efficiency < 1")
     if len(ineff_df) == 0:
@@ -76,23 +79,23 @@ if "res_df" in st.session_state:
         depth = st.slider("Niveles", 2, 4, 3)
         breadth = st.slider("Subpreguntas / nodo", 3, 8, 5)
 
-            if st.button("Crear árbol"):
+        if st.button("Crear árbol"):
 
-            # ---------- detectar identificador ----------
+            # -------- localizar la fila de la DMU --------
             if "DMU" in df.columns:
-                # DMU es una columna normal
                 row = df.loc[df["DMU"] == dmu]
             else:
-                # DMU está en el índice
                 row = df.loc[[dmu]]
 
-            # ---------- contexto detallado ----------
+            # -------- contexto rico para el modelo --------
             context = {
                 "dmu": dmu,
                 "inputs": {c: float(row[c].values[0]) for c in inputs},
                 "outputs": {c: float(row[c].values[0]) for c in outputs},
                 "efficiency": float(
-                    st.session_state["res_df"].set_index("DMU").loc[dmu, "efficiency"]
+                    st.session_state["res_df"]
+                    .set_index("DMU", drop=False)              # asegura columna
+                    .loc[dmu, "efficiency"]
                 ),
                 "peers": (
                     st.session_state["res_df"]
@@ -113,5 +116,3 @@ if "res_df" in st.session_state:
             st.plotly_chart(to_plotly_tree(tree), use_container_width=True)
             with st.expander("JSON completo"):
                 st.json(tree)
-
-
