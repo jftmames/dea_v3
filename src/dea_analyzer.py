@@ -39,7 +39,10 @@ def _dea_core(X, Y, returns_to_scale="CRS"):
         if returns_to_scale == "VRS":
             cons.append(e.T @ lambdas == 1)
 
-        cp.Problem(cp.Minimize(theta), cons).solve(solver=cp.SCS, verbose=False)
+        cp.Problem(cp.Minimize(theta), cons).solve(
+            solver=cp.ECOS, max_iters=1_000, abstol=1e-6, reltol=1e-6, feastol=1e-8
+        )
+
         eff[i] = theta.value if theta.value else np.nan
     return eff
 
