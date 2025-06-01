@@ -134,7 +134,7 @@ def _run_dea_internal(
 
 
 # ------------------------------------------------------------------
-# 3. Funciones públicas: run_ccr y run_bcc
+# 3. Función pública: run_ccr
 # ------------------------------------------------------------------
 def run_ccr(
     df: pd.DataFrame,
@@ -185,7 +185,6 @@ def run_ccr(
             mask = np.ones(n, dtype=bool)
             mask[i] = False
             # Ajustar X_mat, Y_mat y lambdas para excluir la DMU i
-            # Re-crear variables para el problema de super-eficiencia
             lambdas = cp.Variable((n - 1, 1), nonneg=True)
             X_mat = X[:, mask]
             Y_mat = Y[:, mask]
@@ -236,27 +235,98 @@ def run_ccr(
     return pd.DataFrame(resultados)
 
 
+# ------------------------------------------------------------------
+# 4. Función pública: run_bcc (actualizada)
+# ------------------------------------------------------------------
 def run_bcc(
     df: pd.DataFrame,
     dmu_column: str,
     input_cols: list[str],
     output_cols: list[str],
     orientation: str = "input",
-    super_eff: bool = False,
+    super_eff: bool = False
 ) -> pd.DataFrame:
     """
-    Ejecuta DEA BCC radial (input/output, opcional super-eficiencia).
-    Parámetros similares a run_ccr, pero model="BCC".
+    Ejecuta BCC radial y retorna DataFrame con columnas:
+      DMU, tec_efficiency_bcc, lambda_vector, slacks_inputs, slacks_outputs, scale_efficiency, rts_label
     """
     if dmu_column not in df.columns:
-        raise ValueError(f"La columna DMU '{dmu_column}' no existe en el DataFrame.")
+        raise ValueError(f"La columna DMU '{dmu_column}' no existe.")
 
-    return _run_dea_internal(
-        df=df,
-        inputs=input_cols,
-        outputs=output_cols,
-        model="BCC",
-        orientation=orientation,
-        super_eff=super_eff
-    )
+    cols = input_cols + output_cols
+    validate_positive_dataframe(df, cols)
 
+    X = df[input_cols].to_numpy().T  # shape: (m, n)
+    Y = df[output_cols].to_numpy().T  # shape: (s, n)
+    dmus = df[dmu_column].astype(str).tolist()
+    n = X.shape[1]  # número de DMUs
+    m = X.shape[0]  # número de inputs
+    s = Y.shape[0]  # número de outputs
+
+    resultados = []
+    for i in range(n):
+        # Variables de decisión
+        lambdas = cp.Variable((n, 1), nonneg=True)
+        theta = cp.Variable()
+        slacks_in = cp.Variable((m, 1), nonneg=True)
+        slacks_out = cp.Variable((s, 1), nonneg=True)
+
+        # Observaciones de la DMU i
+        x0 = X[:, [i]]
+        y0 = Y[:, [i]]
+
+        cons = []
+        # Restricciones principales (VRS incluye Σλ = 1)
+        cons.append(Y @ lambdas >= y0)
+        cons.append(X @ lambdas <= theta * x0)
+        cons.append(cp.sum(lambdas) == 1)
+
+        obj = cp.Minimize(theta)
+        prob = cp.Problem(obj, cons)
+        prob.solve(
+            solver=cp.ECOS,
+            abstol=1e-6,
+            reltol=1e-6,
+            feastol=1e-8,
+            verbose=False
+        )
+
+        theta_val = float(theta.value) if theta.value is not None else np.nan
+        lambdas_vals = {dmus[j]: float(lambdas.value[j]) for j in range(n)}
+        slacks_input = {input_cols[k]: float(slacks_in.value[k]) for k in range(m)}
+        slacks_output = {output_cols[r]: float(slacks_out.value[r]) for r in range(s)}
+
+        # Para calcular scale_efficiency: corremos CCR
+        df_ccr = run_ccr(
+            df=df,
+            dmu_column=dmu_column,
+            input_cols=input_cols,
+            output_cols=output_cols,
+            orientation=orientation,
+            super_eff=False
+        )
+        ccr_eff = df_ccr.loc[df_ccr[dmu_column] == dmus[i], "tec_efficiency_ccr"].iloc[0]
+        scale_eff = ccr_eff / theta_val if (theta_val and theta_val > 0) else np.nan
+
+        # RTS_label según duales:
+        # si el dual de Σλ=1 en BCC es ±0 => CRS;
+        # si dual < 0 => IRS; si dual > 0 => DRS.
+        dual_sum = prob.constraints[-1].dual_value  # restricción Σλ = 1
+        if abs(dual_sum) < 1e-6:
+            rts_label = "CRS"
+        elif dual_sum < 0:
+            rts_label = "IRS"
+        else:
+            rts_label = "DRS"
+
+        resultados.append({
+            dmu_column: dmus[i],
+            "tec_efficiency_bcc": theta_val,
+            "lambda_vector": lambdas_vals,
+            "slacks_inputs": slacks_input,
+            "slacks_outputs": slacks_output,
+            "scale_efficiency": scale_eff,
+            "rts_label": rts_label
+        })
+
+    return pd.DataFrame(resultados)
