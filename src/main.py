@@ -208,70 +208,78 @@ if upload:
             data=csv_dea,
             file_name="dea_results.csv",
             mime="text/csv",
+            key="download_dea_csv"
         )
 
         # 5.2 Visualizaciones interactivas
-st.markdown("---")
-st.subheader("Visualizaciones interactivas")
+        st.markdown("---")
+        st.subheader("Visualizaciones interactivas")
 
-# A) Histograma de eficiencias
-with st.expander("📊 Histograma de Eficiencias"):
-    hist_fig = plot_efficiency_histogram(dea_df, bins=20)
-    st.plotly_chart(
-        hist_fig,
-        use_container_width=True,
-        key="plot_histogram_efficiencies"
-    )
+        # A) Histograma de eficiencias
+        with st.expander("📊 Histograma de Eficiencias"):
+            try:
+                hist_fig = plot_efficiency_histogram(dea_df, bins=20)
+                st.plotly_chart(
+                    hist_fig,
+                    use_container_width=True,
+                    key="plot_histogram_efficiencies"
+                )
+            except Exception as e:
+                st.error(f"Error al generar el histograma de eficiencias: {e}")
 
-# B) Scatter 3D inputs vs outputs (coloreado por eficiencia)
-if len(st.session_state["inputs"]) >= 2 and len(st.session_state["outputs"]) >= 1:
-    with st.expander("🔍 Scatter 3D Inputs vs Output (coloreado por eficiencia)"):
-        try:
-            scatter3d_fig = plot_3d_inputs_outputs(
-                df,
-                st.session_state["inputs"],
-                st.session_state["outputs"],
-                dea_df
-            )
-            st.plotly_chart(
-                scatter3d_fig,
-                use_container_width=True,
-                key="plot_scatter3d_efficiency"
-            )
-        except Exception as e:
-            st.error(f"Error al generar Scatter 3D: {e}")
-else:
-    st.info("Se requieren ≥2 Inputs y ≥1 Output para el Scatter 3D.")
+        # B) Scatter 3D inputs vs outputs (coloreado por eficiencia)
+        if len(st.session_state["inputs"]) >= 2 and len(st.session_state["outputs"]) >= 1:
+            with st.expander("🔍 Scatter 3D Inputs vs Output (coloreado por eficiencia)"):
+                try:
+                    scatter3d_fig = plot_3d_inputs_outputs(
+                        df,
+                        st.session_state["inputs"],
+                        st.session_state["outputs"],
+                        dea_df
+                    )
+                    st.plotly_chart(
+                        scatter3d_fig,
+                        use_container_width=True,
+                        key="plot_scatter3d_efficiency"
+                    )
+                except KeyError:
+                    st.error("Error al generar Scatter 3D: falta la columna 'DMU'.")
+                except Exception as e:
+                    st.error(f"Error al generar Scatter 3D: {e}")
+        else:
+            st.info("Se requieren ≥2 Inputs y ≥1 Output para el Scatter 3D.")
 
-# C) Benchmark Spider
-with st.expander("🕸️ Benchmark Spider para DMU seleccionada"):
-    if dea_df.query("efficiency == 1").empty:
-        st.info("No hay DMU eficientes (efficiency == 1) para benchmark.")
-    else:
-        selected_dmu = st.selectbox(
-            "Elige DMU para spider",
-            dea_df["DMU"],
-            key="select_spider_dmu"
-        )
-        try:
-            merged_for_spider = dea_df.merge(
-                df[st.session_state["inputs"] + st.session_state["outputs"] + ["DMU"]],
-                on="DMU",
-                how="left"
-            )
-            spider_fig = plot_benchmark_spider(
-                merged_for_spider,
-                selected_dmu,
-                st.session_state["inputs"],
-                st.session_state["outputs"]
-            )
-            st.plotly_chart(
-                spider_fig,
-                use_container_width=True,
-                key="plot_benchmark_spider"
-            )
-        except Exception as e:
-            st.error(f"Imposible generar Benchmark Spider: {e}")
+        # C) Benchmark Spider
+        with st.expander("🕸️ Benchmark Spider para DMU seleccionada"):
+            if dea_df.query("efficiency == 1").empty:
+                st.info("No hay DMU eficientes (efficiency == 1) para benchmark.")
+            else:
+                try:
+                    merged_for_spider = dea_df.merge(
+                        df[st.session_state["inputs"] + st.session_state["outputs"] + ["DMU"]],
+                        on="DMU",
+                        how="left"
+                    )
+                    selected_dmu = st.selectbox(
+                        "Elige DMU para spider",
+                        dea_df["DMU"],
+                        key="select_spider_dmu"
+                    )
+                    spider_fig = plot_benchmark_spider(
+                        merged_for_spider,
+                        selected_dmu,
+                        st.session_state["inputs"],
+                        st.session_state["outputs"]
+                    )
+                    st.plotly_chart(
+                        spider_fig,
+                        use_container_width=True,
+                        key="plot_benchmark_spider"
+                    )
+                except KeyError:
+                    st.error("Imposible generar Benchmark Spider: falta la columna 'DMU'.")
+                except Exception as e:
+                    st.error(f"Imposible generar Benchmark Spider: {e}")
 
         # 5.3 Filtrar DMU ineficientes y generar árbol
         ineff_df = dea_df.query("efficiency < 1")
@@ -344,12 +352,21 @@ with st.expander("🕸️ Benchmark Spider para DMU seleccionada"):
 
             st.markdown("---")
             st.subheader("Árbol de Indagación (último generado)")
-            st.plotly_chart(to_plotly_tree(tree), use_container_width=True, key="tree_chart")
+            st.plotly_chart(
+                to_plotly_tree(tree),
+                use_container_width=True,
+                key="tree_chart"
+            )
 
             # JSON editable del árbol
             st.markdown("**Editar árbol JSON (opcional)**")
             json_text = json.dumps(tree, ensure_ascii=False, indent=2)
-            edited = st.text_area("Árbol JSON", value=json_text, height=200, key="json_edit")
+            edited = st.text_area(
+                "Árbol JSON",
+                value=json_text,
+                height=200,
+                key="json_edit"
+            )
             if st.button("Actualizar árbol", key="btn_update_tree"):
                 try:
                     new_tree = json.loads(edited)
@@ -368,7 +385,11 @@ with st.expander("🕸️ Benchmark Spider para DMU seleccionada"):
             from epistemic_metrics import compute_eee
 
             eee_score = compute_eee(tree, depth_limit=depth, breadth_limit=breadth)
-            st.metric(label="Índice de Equilibrio Erotético (EEE)", value=eee_score, key="eee_metric")
+            st.metric(
+                label="Índice de Equilibrio Erotético (EEE)",
+                value=eee_score,
+                key="eee_metric"
+            )
 
             # Exportaciones del árbol y del EEE
             def _flatten_tree(tree: dict, parent: str = "") -> list[tuple[str, str]]:
@@ -533,7 +554,11 @@ with st.expander("🕸️ Benchmark Spider para DMU seleccionada"):
 
                 # Histograma de las nuevas eficiencias
                 new_hist = plot_efficiency_histogram(new_res, bins=20)
-                st.plotly_chart(new_hist, use_container_width=True, key="new_histogram")
+                st.plotly_chart(
+                    new_hist,
+                    use_container_width=True,
+                    key="new_histogram"
+                )
 
                 # Guardamos en sesión los nuevos resultados y parámetros
                 st.session_state["res_df"] = new_res.copy()
