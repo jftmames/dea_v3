@@ -42,12 +42,13 @@ def to_plotly_tree(tree: dict):
 
 # --- generador principal ---
 def generate_inquiry(root_question: str, depth: int = 2, breadth: int = 4) -> dict:
-    """Genera subpreguntas usando function-calling y devuelve dict JSON."""
+    """Genera árbol con 3 capas de robustez: function-call → json → placeholder."""
     prompt = (
         f"Pregunta raíz: {root_question}\n"
-        f"Genera un árbol con máximo {depth} niveles y {breadth} subpreguntas por nodo."
+        f"Crea un árbol con ≤{depth} niveles y ≤{breadth} subpreguntas por nodo."
     )
 
+    # ---------- 1) intento function-calling ----------
     resp = client.chat.completions.create(
         model="gpt-4o",
         messages=[{"role": "user", "content": prompt}],
@@ -56,9 +57,24 @@ def generate_inquiry(root_question: str, depth: int = 2, breadth: int = 4) -> di
         temperature=0,
     )
 
-    args = resp.choices[0].message.tool_calls[0].function.arguments
-    tree_wrapper = json.loads(args)  # puede ser {'tree': {...}} o {...}
+    if resp.choices[0].message.tool_calls:
+        args = resp.choices[0].message.tool_calls[0].function.arguments
+        try:
+            data = json.loads(args)
+            return data.get("tree", data) or _placeholder_tree(root_question)
+        except json.JSONDecodeError:
+            pass  # caeremos al fallback de texto
 
-    # si la clave existe, úsala; de lo contrario, devuelve el dict tal cual
-    return tree_wrapper.get("tree", tree_wrapper)
+    # ---------- 2) intento parsear texto tradicional ----------
+    raw = resp.choices[0].message.content.strip()
+    try:
+        return json.loads(raw) or _placeholder_tree(root_question)
+    except Exception:
+        return _placeholder_tree(root_question)
+
+
+def _placeholder_tree(root_q: str):
+    """Devuelve un árbol mínimo para evitar que la app quede vacía."""
+    return {root_q: {"ℹ️": "No se pudo generar subpreguntas"}}
+
 
