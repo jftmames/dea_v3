@@ -71,7 +71,7 @@ if upload:
             "Orientación",
             ["input", "output"],
             index=0,
-            help="input‐oriented o output‐oriented"
+            help="input-oriented o output-oriented"
         )
     with col3:
         super_eff = st.checkbox(
@@ -102,19 +102,18 @@ if upload:
                 st.stop()
 
         st.session_state["res_df"] = res
-        st.subheader(f"Eficiencias DEA ({model}-{orientation})")
-        st.dataframe(res, use_container_width=True)
 
 # ------------------------------------------------------------------
-# 5. Complejos de Indagación y exportaciones
+# 5. Mostrar Resultados DEA y habilitar exportaciones, árbol y EEE
 # ------------------------------------------------------------------
 if "res_df" in st.session_state:
-    # Mostrar resultados DEA y botón de descarga
     dea_df = st.session_state["res_df"]
-    st.subheader("Resultados DEA")
+
+    # 5.1 Mostrar tabla de eficiencias
+    st.subheader(f"Resultados DEA ({model}-{orientation})")
     st.dataframe(dea_df, use_container_width=True)
 
-    # Botón para exportar DEA a CSV
+    # 5.2 Botón para exportar DEA a CSV
     csv_dea = dea_df.to_csv(index=False).encode("utf-8")
     st.download_button(
         label="📥 Descargar resultados DEA (CSV)",
@@ -123,7 +122,7 @@ if "res_df" in st.session_state:
         mime="text/csv",
     )
 
-    # Filtrar DMU ineficientes
+    # 5.3 Filtrar DMU ineficientes
     ineff_df = dea_df.query("efficiency < 1")
     if len(ineff_df) == 0:
         st.info("Todas las DMU son eficientes.")
@@ -136,7 +135,7 @@ if "res_df" in st.session_state:
 
         if st.button("Crear árbol"):
 
-            # localizar la fila de la DMU de forma segura
+            # localizar la fila de la DMU
             row = _get_row_by_dmu(df, dmu)
             if row.empty:
                 st.error(f"No se encontró la DMU '{dmu}' en el DataFrame original.")
@@ -165,18 +164,18 @@ if "res_df" in st.session_state:
                     temperature=0.3,
                 )
 
+            # 5.4 Mostrar árbol y JSON
             st.plotly_chart(to_plotly_tree(tree), use_container_width=True)
             with st.expander("JSON completo"):
                 st.json(tree)
 
-            # Cálculo y visualización del EEE
+            # 5.5 Cálculo y visualización del EEE
             from epistemic_metrics import compute_eee
-
             eee_score = compute_eee(tree, depth_limit=depth, breadth_limit=breadth)
             st.metric(label="Índice de Equilibrio Erotético (EEE)", value=eee_score)
 
-            # --- 6.1 Exportar árbol y EEE ---
-            # Aplanar el árbol para CSV
+            # 5.6 Exportaciones CSV y HTML
+            # A) Aplanar el árbol para CSV
             def _flatten_tree(tree: dict, parent: str = "") -> list[tuple[str, str]]:
                 rows = []
                 for q, kids in tree.items():
@@ -185,9 +184,8 @@ if "res_df" in st.session_state:
                         rows.extend(_flatten_tree(kids, q))
                 return rows
 
-            flat = _flatten_tree(tree)  # [(pregunta, padre), …]
+            flat = _flatten_tree(tree)
             df_tree = pd.DataFrame(flat, columns=["question", "parent"])
-
             csv_tree = df_tree.to_csv(index=False).encode("utf-8")
             st.download_button(
                 label="📥 Descargar árbol (CSV)",
@@ -196,7 +194,7 @@ if "res_df" in st.session_state:
                 mime="text/csv",
             )
 
-            # CSV con el EEE y configuración
+            # B) CSV con metadatos EEE
             eee_meta = {
                 "DMU": dmu,
                 "model": model,
@@ -215,9 +213,8 @@ if "res_df" in st.session_state:
                 mime="text/csv",
             )
 
-            # --- 6.2 Generar y descargar reporte completo en HTML ---
+            # C) Reporte HTML completo
             from report_generator import generate_html_report
-
             html_report = generate_html_report(
                 df_dea=dea_df, df_tree=df_tree, df_eee=df_eee
             )
