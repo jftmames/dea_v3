@@ -26,6 +26,9 @@ def run_network_dea(
     Retorna DataFrame con columnas:
       DMU, efficiency_stage1, efficiency_stage2, efficiency_overall, lambda_stage1 (dict), lambda_stage2 (dict)
     """
+    if dmu_column not in df.columns:
+        raise ValueError(f"La columna DMU '{dmu_column}' no existe en el DataFrame.")
+
     # 1) Validar positividad en todas las columnas de ambas etapas
     cols = stage1_inputs + stage1_outputs + stage2_inputs + stage2_outputs
     validate_positive_dataframe(df, cols)
@@ -75,7 +78,7 @@ def run_network_dea(
         # Interconexión: linkage_matrix @ (Y1 λ1) == X2 λ2
         cons.append(linkage_matrix @ (Y1 @ lambda1) == X2 @ lambda2)
 
-        # Objetivo: minimizar (θ1 + θ2)  o podría ser max t tal que θ1 ≥ t, θ2 ≥ t
+        # Objetivo: minimizar (θ1 + θ2)
         obj = cp.Minimize(theta1 + theta2)
 
         prob = cp.Problem(obj, cons)
@@ -83,7 +86,11 @@ def run_network_dea(
 
         theta1_val = float(theta1.value) if theta1.value is not None else np.nan
         theta2_val = float(theta2.value) if theta2.value is not None else np.nan
-        overall_eff = np.nan if theta1_val is None or theta2_val is None else float((theta1_val + theta2_val) / 2)
+        overall_eff = (
+            np.nan 
+            if np.isnan(theta1_val) or np.isnan(theta2_val) 
+            else float((theta1_val + theta2_val) / 2)
+        )
 
         lambda1_vals = {dmus[j]: float(lambda1.value[j]) for j in range(n)}
         lambda2_vals = {dmus[j]: float(lambda2.value[j]) for j in range(n)}
@@ -175,12 +182,18 @@ def run_multi_stage_network(
         prob.solve(solver=cp.ECOS, abstol=1e-6, reltol=1e-6, feastol=1e-8, verbose=False)
 
         # Leer valores
-        theta_vals = [float(t.value) if t.value is not None else np.nan for t in thetas]
-        overall = np.nan if any(v is np.nan for v in theta_vals) else float(sum(theta_vals) / num_etapas)
+        theta_vals = [
+            float(t.value) if t.value is not None else np.nan 
+            for t in thetas
+        ]
+        overall = (
+            np.nan 
+            if any(np.isnan(v) for v in theta_vals) 
+            else float(sum(theta_vals) / num_etapas)
+        )
         lambda_vals_dicts = []
         for k in range(num_etapas):
             lamk = lambdas_vars[k]
-            col_name = f"lambda_stage{k+1}"
             lambda_vals_dicts.append({dmus[j]: float(lamk.value[j]) for j in range(n)})
 
         fila = {dmu_column: dmus[i]}
