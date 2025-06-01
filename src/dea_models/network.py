@@ -121,6 +121,9 @@ def run_multi_stage_network(
     - rts_list: lista de "CRS" o "VRS" por cada etapa
     Retorna DataFrame con columna 'DMU' y eficiencia por etapa y overall.
     """
+    if dmu_column not in df.columns:
+        raise ValueError(f"La columna DMU '{dmu_column}' no existe en el DataFrame.")
+
     # Validar que len(stages) = len(rts_list) y len(linkages)=len(stages)-1
     num_etapas = len(stages)
     if len(rts_list) != num_etapas or len(linkages) != num_etapas - 1:
