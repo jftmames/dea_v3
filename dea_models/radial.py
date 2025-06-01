@@ -3,6 +3,9 @@
 import numpy as np
 import cvxpy as cp
 import pandas as pd
+# dea_models/radial.py
+
+from .utils import validate_positive_dataframe
 
 # ------------------------------------------------------------------
 # 1. Núcleo DEA (CCR / BCC) — input/output orientation
