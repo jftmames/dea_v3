@@ -25,6 +25,12 @@ def run_window_dea(
     Devuelve DataFrame con columnas:
       DMU, start_period, end_period, efficiency
     """
+    # Verificar que existan las columnas DMU y período
+    if dmu_column not in df_panel.columns:
+        raise ValueError(f"La columna DMU '{dmu_column}' no existe en el DataFrame.")
+    if period_column not in df_panel.columns:
+        raise ValueError(f"La columna de periodo '{period_column}' no existe en el DataFrame.")
+
     # 1) Validar positividad en inputs/outputs
     cols = input_cols + output_cols
     validate_positive_dataframe(df_panel, cols)
@@ -43,13 +49,12 @@ def run_window_dea(
         end_p = periods[start_idx + window_size - 1]
         df_win = df_panel[(df_panel[period_column] >= start_p) & (df_panel[period_column] <= end_p)]
 
-        # Construir X y Y agregados (concatenar columnas o promediar según criterio)
-        # Para simplicidad, asumimos que se toma un snapshot final (end_p)
+        # Construir X y Y a partir del snapshot del período final de la ventana
         df_snapshot = df_panel[df_panel[period_column] == end_p]
         X = df_snapshot[input_cols].to_numpy().T
         Y = df_snapshot[output_cols].to_numpy().T
 
-        for i, dmu in enumerate(dmus):
+        for dmu in dmus:
             if dmu not in df_snapshot[dmu_column].astype(str).tolist():
                 continue
             idx = df_snapshot.index[df_snapshot[dmu_column] == dmu][0]
