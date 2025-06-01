@@ -26,13 +26,16 @@ def run_sbm(
     Retorna DataFrame con columnas:
       DMU, efficiency_sbm, slacks_inputs (dict), slacks_outputs (dict), lambda_vector (dict).
     """
+    if dmu_column not in df.columns:
+        raise ValueError(f"La columna DMU '{dmu_column}' no existe en el DataFrame.")
+
     # 1) Validación explicitando que no hay ceros/negativos (solo positivos)
     cols = input_cols + output_cols
     validate_positive_dataframe(df, cols)
 
     # 2) Construir matrices (igual que en radial, pero en formato m×n y s×n)
-    X = df[input_cols].to_numpy().T   # shape m×n
-    Y = df[output_cols].to_numpy().T  # shape s×n
+    X = df[input_cols].to_numpy().T    # shape m×n
+    Y = df[output_cols].to_numpy().T   # shape s×n
     dmus = df[dmu_column].astype(str).tolist()
     n = X.shape[1]
     m = X.shape[0]
@@ -51,34 +54,22 @@ def run_sbm(
             raise ValueError("orientation debe ser 'input' u 'output'")
 
         # Construir restricciones y objetivo según SBM
+        x0 = X[:, [i]]    # (m×1)
+        y0 = Y[:, [i]]    # (s×1)
+
+        cons = []
+        # Y λ + s_plus = y0
+        cons.append(Y @ lambdas + s_plus == y0)
+        # X λ - s_minus = x0
+        cons.append(X @ lambdas - s_minus == x0)
+        # Σ λ = 1 (solo si VRS)
+        if rts == "VRS":
+            cons.append(cp.sum(lambdas) == 1)
+
         if orientation == "input":
-            x0 = X[:, [i]]    # (m×1)
-            y0 = Y[:, [i]]    # (s×1)
-
-            cons = []
-            #  Y λ + s_plus = y0
-            cons.append(Y @ lambdas + s_plus == y0)
-            #  X λ - s_minus = x0
-            cons.append(X @ lambdas - s_minus == x0)
-            #  Σ λ = 1   (solo si VRS)
-            if rts == "VRS":
-                cons.append(cp.sum(lambdas) == 1)
-
             # Función objetivo: min (1/m Σ (x0_i - s_i^-)/x0_i)
             obj = cp.Minimize((1/m) * cp.sum((x0 - s_minus) / x0))
-
         else:  # output-oriented
-            x0 = X[:, [i]]
-            y0 = Y[:, [i]]
-
-            cons = []
-            #  Y λ + s_plus = y0
-            cons.append(Y @ lambdas + s_plus == y0)
-            #  X λ - s_minus = x0
-            cons.append(X @ lambdas - s_minus == x0)
-            if rts == "VRS":
-                cons.append(cp.sum(lambdas) == 1)
-
             # Función objetivo: max (1/s Σ (y0_r + s_r^+)/y0_r)
             obj = cp.Maximize((1/s) * cp.sum((y0 + s_plus) / y0))
 
@@ -126,7 +117,7 @@ def run_radial_distance(
     Retorna DataFrame con columnas:
       DMU, distance_score, lambda_vector, slacks_inputs, slacks_outputs.
     """
-    # 1) validación (permitimos zeros/negativos en RD)
+    # 1) Validación (permitimos zeros/negativos en RD)
     cols = input_cols + output_cols
     # Validar solo conversión a float; permitimos ≤0
     df_num = df.copy()
@@ -134,7 +125,8 @@ def run_radial_distance(
         df_num[c] = pd.to_numeric(df_num[c], errors="coerce")
         if df_num[c].isna().any():
             raise ValueError(f"Columna '{c}' tiene valores no numéricos.")
-    # X, Y
+
+    # Matrices X, Y
     X = df_num[input_cols].to_numpy().T  # m×n
     Y = df_num[output_cols].to_numpy().T # s×n
     dmus = df[dmu_column].astype(str).tolist()
@@ -142,7 +134,7 @@ def run_radial_distance(
     m = X.shape[0]
     s = Y.shape[0]
 
-    # 2) determinar dirección (g_x, g_y)
+    # 2) Determinar dirección (g_x, g_y)
     dir_vec = get_direction_vector(df_num, input_cols, output_cols, method=dir_method)
     g_x = dir_vec["g_x"].reshape((m, 1))
     g_y = dir_vec["g_y"].reshape((s, 1))
@@ -150,7 +142,7 @@ def run_radial_distance(
     resultados = []
     for i in range(n):
         lambdas = cp.Variable((n, 1), nonneg=True)
-        # variable t (distancia direccional)
+        # Variable t (distancia direccional)
         t = cp.Variable()
 
         x0 = X[:, [i]]
@@ -166,7 +158,13 @@ def run_radial_distance(
 
         obj = cp.Minimize(t)
         prob = cp.Problem(obj, cons)
-        prob.solve(solver=cp.ECOS, abstol=1e-6, reltol=1e-6, feastol=1e-8, verbose=False)
+        prob.solve(
+            solver=cp.ECOS,
+            abstol=1e-6,
+            reltol=1e-6,
+            feastol=1e-8,
+            verbose=False
+        )
 
         t_val = float(t.value) if t.value is not None else np.nan
         lambdas_vals = {dmus[j]: float(lambdas.value[j]) for j in range(n)}
