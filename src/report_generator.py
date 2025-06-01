@@ -2,6 +2,7 @@
 import pandas as pd
 import datetime
 
+
 def generate_html_report(
     df_dea: pd.DataFrame,
     df_tree: pd.DataFrame,
@@ -16,7 +17,10 @@ def generate_html_report(
     Retorna HTML listo para escribir a disco o servir como descarga.
     """
     fecha = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    html = f"<html><head><meta charset='utf-8'><title>Reporte DEA Deliberativo</title></head><body>"
+    html = (
+        "<html><head><meta charset='utf-8'>"
+        "<title>Reporte DEA Deliberativo</title></head><body>"
+    )
     html += f"<h1>Reporte DEA Deliberativo – {fecha}</h1>"
 
     # Sección DEA
