@@ -28,7 +28,6 @@ def _dea_core(
     eff = np.zeros(n)
 
     for i in range(n):
-        # índices de las otras DMU (para super-eficiencia)
         if super_eff:
             mask = np.ones(n, dtype=bool)
             mask[i] = False
@@ -40,12 +39,10 @@ def _dea_core(
             Y_mat = Y
             num_vars = n
 
-        # variables lambda
         lambdas = cp.Variable((num_vars, 1), nonneg=True)
 
         if orientation == "input":
             theta = cp.Variable()
-            # restricciones input-oriented
             cons = [
                 Y_mat @ lambdas >= Y[:, [i]],
                 X_mat @ lambdas <= theta * X[:, [i]],
@@ -72,13 +69,17 @@ def _dea_core(
             verbose=False
         )
 
-        # extraer valor
         if orientation == "input":
             eff[i] = float(theta.value) if theta.value is not None else np.nan
         else:
             eff[i] = float(phi.value) if phi.value is not None else np.nan
 
     return eff
+
+
+# ------------------------------------------------------------------
+# 2. Función interna que antes se llamaba run_dea
+# ------------------------------------------------------------------
 def _run_dea_internal(
     df: pd.DataFrame,
     inputs: list[str],
@@ -88,12 +89,24 @@ def _run_dea_internal(
     super_eff: bool = False,
 ) -> pd.DataFrame:
     """
-    (Copia completa del docstring que tenía run_dea en su momento,
-     con la explicación original.)
+    Ejecuta DEA (CCR/BCC, input/output, opcional super-eficiencia).
+    Parámetros:
+      df: DataFrame original (incluye identificador index o columna "DMU")
+      inputs: lista de nombres de columnas de inputs (numéricos y > 0)
+      outputs: lista de nombres de columnas de outputs (numéricos y > 0)
+      model: "CCR" o "BCC"
+      orientation: "input" o "output"
+      super_eff: True para super-eficiencia (excluye DMU actual)
+    Retorna DataFrame con columnas:
+      DMU, efficiency, model, orientation, super_eff
     """
+    # validaciones iniciales
+    assert orientation in ("input", "output"), "orientation debe ser 'input' u 'output'"
+    assert model.upper() in ("CCR", "BCC"), "model debe ser 'CCR' o 'BCC'"
+
     # 1) Extraer sólo columnas requeridas y convertir a float
     cols = inputs + outputs
-    df_num = validate_positive_dataframe(df, cols)  # antes era _safe_numeric
+    df_num = validate_positive_dataframe(df, cols)
 
     # 2) Construir matrices X y Y (shape: m×n, s×n)
     X = df_num[inputs].to_numpy().T
@@ -118,3 +131,64 @@ def _run_dea_internal(
         "orientation": orientation,
         "super_eff": bool(super_eff),
     })
+
+
+# ------------------------------------------------------------------
+# 3. Funciones públicas: run_ccr y run_bcc
+# ------------------------------------------------------------------
+def run_ccr(
+    df: pd.DataFrame,
+    dmu_column: str,
+    input_cols: list[str],
+    output_cols: list[str],
+    orientation: str = "input",
+    super_eff: bool = False,
+) -> pd.DataFrame:
+    """
+    Ejecuta DEA CCR radial (input/output, opcional super-eficiencia).
+    Parámetros:
+      df: DataFrame original
+      dmu_column: nombre de la columna que identifica cada DMU
+      input_cols: lista de columnas de inputs
+      output_cols: lista de columnas de outputs
+      orientation: "input" o "output"
+      super_eff: True para super-eficiencia
+    Retorna:
+      DataFrame con columnas [DMU, efficiency, model, orientation, super_eff]
+    """
+    if dmu_column not in df.columns:
+        raise ValueError(f"La columna DMU '{dmu_column}' no existe en el DataFrame.")
+
+    return _run_dea_internal(
+        df=df,
+        inputs=input_cols,
+        outputs=output_cols,
+        model="CCR",
+        orientation=orientation,
+        super_eff=super_eff
+    )
+
+
+def run_bcc(
+    df: pd.DataFrame,
+    dmu_column: str,
+    input_cols: list[str],
+    output_cols: list[str],
+    orientation: str = "input",
+    super_eff: bool = False,
+) -> pd.DataFrame:
+    """
+    Ejecuta DEA BCC radial (input/output, opcional super-eficiencia).
+    Parámetros similares a run_ccr, pero model="BCC".
+    """
+    if dmu_column not in df.columns:
+        raise ValueError(f"La columna DMU '{dmu_column}' no existe en el DataFrame.")
+
+    return _run_dea_internal(
+        df=df,
+        inputs=input_cols,
+        outputs=output_cols,
+        model="BCC",
+        orientation=orientation,
+        super_eff=super_eff
+    )
