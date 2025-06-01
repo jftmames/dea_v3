@@ -1,26 +1,52 @@
-# dea_models/utils.py
+# src/dea_models/utils.py
 
 import pandas as pd
 
-def validate_positive_dataframe(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
+def validate_dataframe(
+    df: pd.DataFrame,
+    input_cols: list[str],
+    output_cols: list[str],
+    allow_zero: bool = False,
+    allow_negative: bool = False
+):
     """
-    Convierte las columnas 'cols' de df a float.
-    Si alguno de los valores no es convertible o ≤ 0, lanza ValueError.
-    Retorna un DataFrame con solo esas columnas (conversión a float).
+    Valida que el DataFrame tenga:
+      - Columnas input_cols y output_cols existentes y numéricas.
+      - Si allow_zero=False, no permite ceros en inputs/outputs.
+      - Si allow_negative=False, no permite negativos.
+    Lanza ValueError si falla, retorna True si ok.
     """
-    df_copy = df.copy()
-    bad_cols = []
+    cols = input_cols + output_cols
+    faltantes = set(cols) - set(df.columns)
+    if faltantes:
+        raise ValueError(f"Faltan columnas: {faltantes}")
 
-    for c in cols:
-        # convertir a numérico (NaN en casos inválidos)
-        df_copy[c] = pd.to_numeric(df_copy[c], errors="coerce")
-        # verificar NaN o ≤ 0
-        if df_copy[c].isna().any() or (df_copy[c] <= 0).any():
-            bad_cols.append(c)
+    # Verificar numérico y condiciones de cero/negativos
+    for col in cols:
+        if not pd.api.types.is_numeric_dtype(df[col]):
+            raise ValueError(f"Columna '{col}' no es numérica.")
 
-    if bad_cols:
-        raise ValueError(
-            f"Columnas con datos inválidos (no numéricos o ≤ 0): {bad_cols}"
-        )
+        if not allow_zero and (df[col] == 0).any():
+            cnt = int((df[col] == 0).sum())
+            raise ValueError(f"Columna '{col}' tiene {cnt} ceros; no permitidos.")
 
-    return df_copy[cols]
+        if not allow_negative and (df[col] < 0).any():
+            cnt = int((df[col] < 0).sum())
+            raise ValueError(f"Columna '{col}' tiene {cnt} valores negativos; no permitidos.")
+
+    return True
+
+
+def check_positive_data(df: pd.DataFrame, columns: list[str]):
+    """
+    Similar a validate_dataframe(..., allow_zero=False, allow_negative=False).
+    """
+    return validate_dataframe(df, columns, columns, allow_zero=False, allow_negative=False)
+
+
+def check_zero_negative_data(df: pd.DataFrame, columns: list[str]):
+    """
+    Similar a validate_dataframe(..., allow_zero=True, allow_negative=False).
+    """
+    return validate_dataframe(df, columns, columns, allow_zero=True, allow_negative=False)
+
