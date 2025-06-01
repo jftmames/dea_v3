@@ -22,16 +22,20 @@ def to_plotly_tree(tree: dict):
 # ---------- Function-Calling ----------
 FUNCTION_SPEC = {
     "name": "return_tree",
-    "description": "Árbol de subpreguntas jerárquico para analizar ineficiencia DEA",
+    "description": "Devuelve un árbol de subpreguntas anidadas (clave = pregunta, valor = subárbol).",
     "parameters": {
         "type": "object",
-        "description": "Nodo raíz con subnodos anidados",
-        "additionalProperties": {
-            "type": "object",
-            "additionalProperties": {"type": "object"},
+        "properties": {
+            "tree": {
+                "type": "object",
+                "description": "Nodo raíz con subnodos arbitrarios.",
+                "additionalProperties": {"type": "object"},
+            }
         },
+        "required": ["tree"],
     },
 }
+
 
 
 def generate_inquiry(root_question: str, depth: int = 2, breadth: int = 4) -> dict:
