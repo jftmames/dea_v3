@@ -64,16 +64,15 @@ def _llm_suggest(
         f"INPUTS: {inputs}\nOUTPUTS: {outputs}\n\n"
         "Responde **SOLO** en JSON con las claves 'ready', 'issues', 'suggested_fixes'."
     )
-    chat = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0
-    )
-    content = chat.choices[0].message.content
     try:
-        return json.loads(content)
-    except Exception:
-        return {"raw": content}
+        chat = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0
+        )
+        return json.loads(chat.choices[0].message.content)
+    except Exception as e:
+        return {"error": "LLM request failed", "message": str(e)}
 
 
 # ---------- API pública ----------
@@ -86,7 +85,7 @@ def validate(
     Ejecuta las validaciones formales y consulta al LLM.
     Retorna dict con:
       - 'formal_issues': lista de strings (errores formales)
-      - 'llm': dict con la respuesta JSON del LLM (o {'raw': texto} si no fue JSON)
+      - 'llm': dict con la respuesta JSON del LLM (o error si falla)
     """
     formal_issues = _formal_checks(df, inputs, outputs)
     llm_json = _llm_suggest(df.head().to_json(), inputs, outputs)
