@@ -1,22 +1,29 @@
 import os
+import json
 import pandas as pd
 from openai import OpenAI
 
-# cliente OpenAI usando la clave almacenada en Secrets
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # ---------- reglas formales básicas ----------
-for col in df.columns:
-    if not pd.api.types.is_numeric_dtype(df[col]):
-        issues.append(f"Columna '{col}' no es numérica.")
-
 def _formal_checks(df: pd.DataFrame):
     issues = []
+
+    # valores nulos
     if df.isnull().values.any():
         issues.append("Se encontraron valores nulos.")
+
+    # positivos
     if (df.select_dtypes(include="number") <= 0).any().any():
         issues.append("Hay números ≤ 0; DEA requiere positivos.")
+
+    # columnas no numéricas
+    for col in df.columns:
+        if not pd.api.types.is_numeric_dtype(df[col]):
+            issues.append(f"Columna '{col}' no es numérica.")
+
     return issues
+
 
 # ---------- consulta al LLM ----------
 def _llm_suggest(df_head: str, inputs: list[str], outputs: list[str]):
@@ -32,7 +39,12 @@ def _llm_suggest(df_head: str, inputs: list[str], outputs: list[str]):
         messages=[{"role": "user", "content": prompt}],
         temperature=0
     )
-    return chat.choices[0].message.content
+    # puede venir como string JSON; intentamos parsear
+    try:
+        return json.loads(chat.choices[0].message.content)
+    except Exception:
+        return {"raw": chat.choices[0].message.content}
+
 
 # ---------- API pública ----------
 def validate(df: pd.DataFrame, inputs: list[str], outputs: list[str]):
