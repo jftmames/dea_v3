@@ -13,7 +13,7 @@ from results import (
 from openai_helpers import explain_orientation, recommend_alternatives
 
 
-# ---------- util: obtener la fila de la DMU ----------
+# ---------- Util: obtener la fila de la DMU ----------
 def _get_row_by_dmu(df: pd.DataFrame, dmu: str) -> pd.DataFrame:
     """Devuelve la fila correspondiente a la DMU sin lanzar KeyError."""
     if "DMU" in df.columns:
@@ -29,20 +29,20 @@ def _get_row_by_dmu(df: pd.DataFrame, dmu: str) -> pd.DataFrame:
 # ---------- UI principal ----------
 st.set_page_config(page_title="DEA Deliberativo MVP", layout="wide")
 st.title("DEA Deliberativo – MVP")
+st.markdown(
+    "Este flujo único permite: **(1)** subir datos, ejecutar DEA, generar árbol de indagación; "
+    "y **(2)**, una vez generado el árbol, reajustar el modelo DEA sin cambiar de pestaña."
+)
 
 # ------------------------------------------------------------------
 # 1. Cargar CSV (área principal)
 # ------------------------------------------------------------------
 upload = st.file_uploader("Sube tu CSV", type="csv")
-
 if upload:
     df = pd.read_csv(upload)
-
-    # — Si no existe "DMU", pero sí "DMU_ID", renombramos/duplicamos para unificar —
-    if "DMU" not in df.columns and "DMU_ID" in df.columns:
-        df["DMU"] = df["DMU_ID"]
-
-    st.subheader("Vista previa")
+    # Guardamos el DataFrame original en sesión, para “Reajustar” más adelante
+    st.session_state["orig_df"] = df.copy()
+    st.subheader("Vista previa del CSV")
     st.dataframe(df.head(), use_container_width=True)
 
     num_dmu = df.shape[0]
@@ -61,14 +61,18 @@ if upload:
             "Inputs",
             numeric_cols,
             default=numeric_cols[:-1],
-            help="Columnas numéricas que se usarán como insumos (deben existir)."
+            help="Columnas numéricas que se usarán como insumos (mínimo 1)."
         )
         outputs = st.multiselect(
             "Outputs",
             numeric_cols,
             default=[numeric_cols[-1]],
-            help="Columnas numéricas que se usarán como productos (deben existir)."
+            help="Columnas numéricas que se usarán como productos (mínimo 1)."
         )
+
+        # Guardamos esas selecciones en sesión para reutilizar luego
+        st.session_state["inputs"] = inputs
+        st.session_state["outputs"] = outputs
 
         st.markdown("---")
         st.markdown("## Configuración DEA")
@@ -77,7 +81,7 @@ if upload:
             "Modelo",
             ["CCR", "BCC"],
             index=0,
-            help="CCR = retornos constantes (CRS); BCC = retornos variables (VRS)."
+            help="CCR = retornos constantes; BCC = retornos variables."
         )
         orientation = st.selectbox(
             "Orientación",
@@ -90,6 +94,11 @@ if upload:
             value=False,
             help="Si se activa, la DMU actual se excluye al calcular su eficiencia."
         )
+
+        # Guardamos en sesión el modelo/orientación/super_eff
+        st.session_state["dea_model"] = model
+        st.session_state["dea_orientation"] = orientation
+        st.session_state["dea_super_eff"] = super_eff
 
         st.markdown("---")
         st.markdown("**Validaciones automáticas:**")
@@ -113,7 +122,7 @@ if upload:
             st.json(result)
 
     # ------------------------------------------------------------------
-    # 2.1. Sugerir alternativas de Inputs/Outputs (nuevo)
+    # 3. Sugerir alternativas de Inputs/Outputs (con OpenAI)
     # ------------------------------------------------------------------
     if st.button("Sugerir alternativas de Inputs/Outputs"):
         if not inputs or not outputs:
@@ -124,8 +133,6 @@ if upload:
                 inputs=inputs,
                 outputs=outputs
             )
-            # Guardamos la última recomendación en sesión
-            st.session_state["last_reco"] = rec
             if rec.get("recommend_inputs") is not None:
                 st.subheader("Recomendaciones de Inputs")
                 st.write(rec["recommend_inputs"])
@@ -136,12 +143,8 @@ if upload:
                 st.write(rec.get("text", "La IA no devolvió sugerencias en formato JSON."))
 
     # ------------------------------------------------------------------
-    # 3. Ejecutar DEA
+    # 4. Ejecutar DEA
     # ------------------------------------------------------------------
-    st.session_state["orig_df"] = df
-    st.session_state["inputs"] = inputs
-    st.session_state["outputs"] = outputs
-
     if run_button:
         # Revalidar antes de ejecutar
         if model == "BCC" and num_dmu < 2:
@@ -149,6 +152,9 @@ if upload:
             st.stop()
         if super_eff and num_dmu < 2:
             st.error("No se puede ejecutar super-eficiencia con menos de 2 DMU.")
+            st.stop()
+        if not inputs or not outputs:
+            st.error("Debe seleccionar al menos un Input y un Output.")
             st.stop()
 
         with st.spinner(f"Calculando eficiencias DEA para {num_dmu} DMU…"):
@@ -168,8 +174,8 @@ if upload:
                 st.error(f"❌ {e}")
                 st.stop()
 
-        # Guardamos en sesión el DataFrame y parámetros
-        st.session_state["res_df"] = res
+        # Guardamos en sesión el DataFrame con eficiencias y parámetros
+        st.session_state["res_df"] = res.copy()
         st.session_state["dea_model"] = model
         st.session_state["dea_orientation"] = orientation
         st.session_state["dea_super_eff"] = super_eff
@@ -177,7 +183,7 @@ if upload:
         st.success("✅ DEA calculado correctamente")
 
     # ------------------------------------------------------------------
-    # 4. Mostrar Resultados DEA y habilitar exportaciones, árbol, EEE y gráficos
+    # 5. Mostrar Resultados DEA y habilitar exportaciones, árbol y EEE
     # ------------------------------------------------------------------
     if "res_df" in st.session_state:
         dea_df = st.session_state["res_df"]
@@ -185,11 +191,11 @@ if upload:
         orientation = st.session_state["dea_orientation"]
         super_eff = st.session_state["dea_super_eff"]
 
-        # 4.1 Tabla de eficiencias
+        st.markdown("---")
         st.subheader(f"Resultados DEA ({model}-{orientation})")
         st.dataframe(dea_df, use_container_width=True)
 
-        # 4.2 Botón para exportar resultados DEA a CSV
+        # 5.1 Exportar DEA a CSV
         csv_dea = dea_df.to_csv(index=False).encode("utf-8")
         st.download_button(
             label="📥 Descargar resultados DEA (CSV)",
@@ -198,7 +204,7 @@ if upload:
             mime="text/csv",
         )
 
-        # 4.3 Visualizaciones interactivas
+        # 5.2 Visualizaciones interactivas
         st.markdown("---")
         st.subheader("Visualizaciones interactivas")
 
@@ -207,11 +213,13 @@ if upload:
             hist_fig = plot_efficiency_histogram(dea_df, bins=20)
             st.plotly_chart(hist_fig, use_container_width=True)
 
-        # B) Scatter 3D inputs vs outputs
-        if len(inputs) >= 2 and len(outputs) >= 1:
+        # B) Scatter 3D inputs vs outputs (coloreado por eficiencia)
+        if len(st.session_state["inputs"]) >= 2 and len(st.session_state["outputs"]) >= 1:
             with st.expander("🔍 Scatter 3D Inputs vs Output (coloreado por eficiencia)"):
                 try:
-                    scatter3d_fig = plot_3d_inputs_outputs(df, inputs, outputs, dea_df)
+                    scatter3d_fig = plot_3d_inputs_outputs(
+                        df, st.session_state["inputs"], st.session_state["outputs"], dea_df
+                    )
                     st.plotly_chart(scatter3d_fig, use_container_width=True)
                 except Exception as e:
                     st.error(f"Error al generar Scatter 3D: {e}")
@@ -225,56 +233,55 @@ if upload:
             else:
                 selected_dmu = st.selectbox("Elige DMU para spider", dea_df["DMU"])
                 try:
-                    # Unimos dea_df (que ya tiene columna 'DMU') con df original
                     merged_for_spider = dea_df.merge(
-                        df, on="DMU", how="left"
+                        df[st.session_state["inputs"] + st.session_state["outputs"] + (["DMU"] if "DMU" in df.columns else [])],
+                        on="DMU",
+                        how="left"
                     )
                     spider_fig = plot_benchmark_spider(
                         merged_for_spider,
                         selected_dmu,
-                        inputs,
-                        outputs
+                        st.session_state["inputs"],
+                        st.session_state["outputs"]
                     )
                     st.plotly_chart(spider_fig, use_container_width=True)
                 except Exception as e:
-                    st.error(f"Imposible generar Spider: {e}")
+                    st.error(f"Imposible generar Benchmark Spider: {e}")
 
-        # 4.4 Filtrar DMU ineficientes
+        # 5.3 Filtrar DMU ineficientes y generar árbol
         ineff_df = dea_df.query("efficiency < 1")
         if len(ineff_df) == 0:
             st.info("Todas las DMU son eficientes.")
         else:
-            st.subheader("Generar Complejo de Indagación")
+            st.markdown("---")
+            st.subheader("Generar Complejo de Indagación para una DMU ineficiente")
             dmu = st.selectbox("DMU ineficiente", ineff_df["DMU"])
 
-            # Definimos sliders con límites razonables
             depth = st.slider(
                 "Niveles del árbol",
                 min_value=2,
                 max_value=4,
                 value=3,
-                help="Define cuántos niveles jerárquicos tendrá el árbol (2–4)."
+                help="Cuántos niveles jerárquicos tendrá el árbol (2–4)."
             )
             breadth = st.slider(
                 "Subpreguntas / nodo",
                 min_value=2,
                 max_value=6,
                 value=3,
-                help="Define cuántos hijos máximo puede tener cada nodo (2–6)."
+                help="Cuántos hijos máximo puede tener cada nodo (2–6)."
             )
 
             if st.button("Crear árbol"):
-                # localizamos la fila de la DMU
                 row = _get_row_by_dmu(df, dmu)
                 if row.empty:
                     st.error(f"No se encontró la DMU '{dmu}' en el DataFrame original.")
                     st.stop()
 
-                # contexto rico para la IA
                 context = {
                     "dmu": dmu,
-                    "inputs": {c: float(row[c].values[0]) for c in inputs},
-                    "outputs": {c: float(row[c].values[0]) for c in outputs},
+                    "inputs": {c: float(row[c].values[0]) for c in st.session_state["inputs"]},
+                    "outputs": {c: float(row[c].values[0]) for c in st.session_state["outputs"]},
                     "efficiency": float(
                         dea_df.set_index("DMU", drop=False).loc[dmu, "efficiency"]
                     ),
@@ -293,24 +300,26 @@ if upload:
                         temperature=0.3,
                     )
 
-                # Guardamos el árbol y los parámetros depth/breadth en sesión
+                # Guardamos en sesión el árbol y sus parámetros para “Reajustar Modelo”
                 st.session_state["last_tree"] = tree
+                st.session_state["last_dmu"] = dmu
                 st.session_state["last_depth"] = depth
                 st.session_state["last_breadth"] = breadth
-                st.session_state["last_dmu"] = dmu
+
                 st.success("✅ Árbol generado correctamente")
 
-        # 4.5 Mostrar árbol si existe
+        # 5.4 Mostrar árbol y EEE (si existe)
         if "last_tree" in st.session_state:
             tree = st.session_state["last_tree"]
-            depth = st.session_state.get("last_depth", 2)
-            breadth = st.session_state.get("last_breadth", 2)
-            dmu = st.session_state.get("last_dmu", None)
+            dmu = st.session_state["last_dmu"]
+            depth = st.session_state["last_depth"]
+            breadth = st.session_state["last_breadth"]
 
+            st.markdown("---")
             st.subheader("Árbol de Indagación (último generado)")
             st.plotly_chart(to_plotly_tree(tree), use_container_width=True)
 
-            # 4.6 JSON editable
+            # JSON editable del árbol
             st.markdown("**Editar árbol JSON (opcional)**")
             json_text = json.dumps(tree, ensure_ascii=False, indent=2)
             edited = st.text_area("Árbol JSON", value=json_text, height=200)
@@ -328,13 +337,13 @@ if upload:
             with st.expander("Ver JSON completo"):
                 st.json(st.session_state["last_tree"])
 
-            # 4.7 Cálculo y visualización del EEE
+            # Cálculo y visualización del EEE
             from epistemic_metrics import compute_eee
 
             eee_score = compute_eee(tree, depth_limit=depth, breadth_limit=breadth)
             st.metric(label="Índice de Equilibrio Erotético (EEE)", value=eee_score)
 
-            # 4.8 Exportaciones (CSV/JSON y reporte HTML)
+            # Exportaciones del árbol y del EEE
             def _flatten_tree(tree: dict, parent: str = "") -> list[tuple[str, str]]:
                 rows = []
                 for q, kids in tree.items():
@@ -346,7 +355,7 @@ if upload:
             flat = _flatten_tree(tree)
             df_tree = pd.DataFrame(flat, columns=["question", "parent"])
 
-            # A) Descargar árbol en CSV
+            # Descargar árbol en CSV
             csv_tree = df_tree.to_csv(index=False).encode("utf-8")
             st.download_button(
                 label="📥 Descargar árbol (CSV)",
@@ -355,7 +364,7 @@ if upload:
                 mime="text/csv",
             )
 
-            # B) Descargar árbol en JSON
+            # Descargar árbol en JSON
             json_tree_bytes = json.dumps(tree, ensure_ascii=False, indent=2).encode("utf-8")
             st.download_button(
                 label="📥 Descargar árbol (JSON)",
@@ -364,7 +373,7 @@ if upload:
                 mime="application/json",
             )
 
-            # C) CSV con metadatos EEE
+            # Descargar EEE como CSV de metadatos
             eee_meta = {
                 "DMU": dmu,
                 "model": model,
@@ -383,7 +392,7 @@ if upload:
                 mime="text/csv",
             )
 
-            # D) Reporte HTML completo
+            # Descargar reporte completo HTML
             from report_generator import generate_html_report
 
             html_report = generate_html_report(
@@ -396,3 +405,109 @@ if upload:
                 file_name="reporte_dea_deliberativo.html",
                 mime="text/html",
             )
+
+        # ------------------------------------------------------------------
+        # 6. REAJUSTAR MODELO DEA tras indagación (nueva sección)
+        # ------------------------------------------------------------------
+        if "last_tree" in st.session_state:
+            st.markdown("---")
+            st.subheader("Reajustar Modelo DEA según indagación")
+
+            # 6.1 Mostrar contexto actual (inputs/outputs y árbol)
+            st.markdown("**Inputs/Outputs actuales:**")
+            st.write("• Inputs seleccionados:", st.session_state["inputs"])
+            st.write("• Outputs seleccionados:", st.session_state["outputs"])
+            st.write("• Modelo:", model, "|", "Orientación:", orientation, "|", "Super-eff:", super_eff)
+
+            # 6.2 Opción de explicar orientación con IA
+            if st.button("¿Debo cambiar orientación (input/output)?"):
+                ex = explain_orientation(
+                    inputs=st.session_state["inputs"],
+                    outputs=st.session_state["outputs"],
+                    orientation=st.session_state["dea_orientation"]
+                )
+                if ex.get("text"):
+                    st.info(ex["text"])
+                else:
+                    st.error("La IA no devolvió sugerencia de orientación.")
+
+            # 6.3 Formulario para reajustar Inputs/Outputs y parámetros
+            new_inputs = st.multiselect(
+                "Modificar Inputs (según subpreguntas)",
+                options=st.session_state["orig_df"].select_dtypes(include="number").columns.tolist(),
+                default=st.session_state["inputs"],
+                help="Añada o quite insumos tras leer el árbol."
+            )
+            new_outputs = st.multiselect(
+                "Modificar Outputs (según subpreguntas)",
+                options=st.session_state["orig_df"].select_dtypes(include="number").columns.tolist(),
+                default=st.session_state["outputs"],
+                help="Añada o quite productos tras leer el árbol."
+            )
+
+            new_model = st.selectbox(
+                "Modelo (CCR/BCC) reajustado",
+                ["CCR", "BCC"],
+                index=0 if st.session_state["dea_model"] == "CCR" else 1
+            )
+            new_orientation = st.selectbox(
+                "Orientación (input/output) reajustada",
+                ["input", "output"],
+                index=0 if st.session_state["dea_orientation"] == "input" else 1
+            )
+            new_super_eff = st.checkbox(
+                "Super-eficiencia (reajustada)",
+                value=st.session_state["dea_super_eff"],
+                help="Marque para excluir la DMU al calcular su eficiencia (super-eff)."
+            )
+
+            if st.button("Reejecutar DEA con ajustes"):
+                orig_df = st.session_state["orig_df"]
+                num_dmu = orig_df.shape[0]
+
+                # Validaciones
+                if new_model == "BCC" and num_dmu < 2:
+                    st.error("No se puede usar BCC con menos de 2 DMU.")
+                    st.stop()
+                if new_super_eff and num_dmu < 2:
+                    st.error("No se puede usar super-eficiencia con menos de 2 DMU.")
+                    st.stop()
+                if not new_inputs or not new_outputs:
+                    st.error("Debe seleccionar al menos un Input y un Output.")
+                    st.stop()
+
+                with st.spinner("Recalculando eficiencias DEA con parámetros ajustados…"):
+                    try:
+                        new_res = run_dea(
+                            orig_df,
+                            new_inputs,
+                            new_outputs,
+                            model=new_model,
+                            orientation=new_orientation,
+                            super_eff=new_super_eff,
+                        )
+                        if new_res["efficiency"].isna().all():
+                            st.error("⚠️ El solver no devolvió soluciones válidas en la reejecución.")
+                            st.stop()
+                    except Exception as e:
+                        st.error(f"❌ Error al recalcular DEA: {e}")
+                        st.stop()
+
+                st.success("✅ DEA reejecutado correctamente con parámetros ajustados.")
+                st.subheader("Nuevas eficiencias DEA")
+                st.dataframe(new_res, use_container_width=True)
+
+                # Histograma de las nuevas eficiencias
+                new_hist = plot_efficiency_histogram(new_res, bins=20)
+                st.plotly_chart(new_hist, use_container_width=True)
+
+                # Guardamos en sesión los nuevos resultados y parámetros
+                st.session_state["res_df"] = new_res.copy()
+                st.session_state["dea_model"] = new_model
+                st.session_state["dea_orientation"] = new_orientation
+                st.session_state["dea_super_eff"] = new_super_eff
+                st.session_state["inputs"] = new_inputs
+                st.session_state["outputs"] = new_outputs
+
+else:
+    st.info("Carga primero un CSV para comenzar.")
