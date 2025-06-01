@@ -3,4 +3,5 @@ pandas
 openai>=1.0
 cvxpy
 numpy
+plotly
 
