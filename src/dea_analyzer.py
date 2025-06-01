@@ -2,43 +2,50 @@ import numpy as np
 import cvxpy as cp
 import pandas as pd
 
+
 # ------------------------------------------------------------------
-# CORE DEA (CCR / BCC, orientación input)
+def _safe_numeric(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
+    """
+    Intenta convertir cada columna a float.
+    Devuelve df_numérico o lanza ValueError con lista de columnas problemáticas.
+    """
+    bad_cols = []
+    converted = {}
+    for c in cols:
+        converted[c] = pd.to_numeric(df[c], errors="coerce")
+        if converted[c].isna().any():
+            bad_cols.append(c)
+
+    if bad_cols:
+        raise ValueError(
+            f"Estas columnas tienen valores no numéricos o vacíos: {bad_cols}. "
+            "Límpialas o elimínalas de la selección."
+        )
+    return pd.DataFrame(converted)
+
+
 # ------------------------------------------------------------------
-def _dea_core(X, Y, returns_to_scale: str = "CRS"):
-    """
-    X: np.array shape (m, n)  — inputs
-    Y: np.array shape (s, n)  — outputs
-    returns_to_scale: "CRS" (CCR) | "VRS" (BCC)
-    """
+def _dea_core(X, Y, returns_to_scale="CRS"):
+    """CCR/BCC input-oriented"""
     m, n = X.shape
-    s, _ = Y.shape
     e = np.ones((n, 1))
-    efficiencies = np.zeros(n)
+    eff = np.zeros(n)
 
     for i in range(n):
         x_i = X[:, [i]]
         y_i = Y[:, [i]]
-
         lambdas = cp.Variable((n, 1), nonneg=True)
         theta = cp.Variable()
 
-        constraints = [
-            Y @ lambdas >= y_i,
-            X @ lambdas <= theta * x_i,
-        ]
-        if returns_to_scale == "VRS":          # BCC
-            constraints.append(e.T @ lambdas == 1)
+        cons = [Y @ lambdas >= y_i, X @ lambdas <= theta * x_i]
+        if returns_to_scale == "VRS":
+            cons.append(e.T @ lambdas == 1)
 
-        prob = cp.Problem(cp.Minimize(theta), constraints)
-        prob.solve(solver=cp.SCS, verbose=False)
-        efficiencies[i] = theta.value if theta.value else np.nan
-
-    return efficiencies
+        cp.Problem(cp.Minimize(theta), cons).solve(solver=cp.SCS, verbose=False)
+        eff[i] = theta.value if theta.value else np.nan
+    return eff
 
 
-# ------------------------------------------------------------------
-# API pública
 # ------------------------------------------------------------------
 def run_dea(
     df: pd.DataFrame,
@@ -47,20 +54,11 @@ def run_dea(
     model: str = "CCR",
     orientation: str = "input",
 ) -> pd.DataFrame:
-    """
-    Ejecuta un modelo DEA (CCR o BCC), orientación input.
-    Devuelve DataFrame con DMU, eficiencia y metadatos.
-    """
     assert orientation == "input", "Solo orientación input implementada"
 
-    # -------- aseguramos que todo sea numérico --------
-    try:
-        df_numeric = df[inputs + outputs].astype(float)
-    except ValueError as e:
-        raise ValueError(f"Conversión a float falló: {e}")
-
-    X = df_numeric[inputs].to_numpy().T   # shape (m, n)
-    Y = df_numeric[outputs].to_numpy().T  # shape (s, n)
+    df_num = _safe_numeric(df, inputs + outputs)  # <- validación fuerte
+    X = df_num[inputs].to_numpy().T
+    Y = df_num[outputs].to_numpy().T
 
     rts = "CRS" if model.upper() == "CCR" else "VRS"
     eff = _dea_core(X, Y, returns_to_scale=rts)
