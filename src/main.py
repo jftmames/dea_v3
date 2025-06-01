@@ -1,4 +1,3 @@
-# ---------- src/main.py ----------
 import streamlit as st
 import pandas as pd
 import json
@@ -13,6 +12,7 @@ from results import (
 )
 from openai_helpers import explain_orientation, recommend_alternatives
 
+
 # ---------- util: obtener la fila de la DMU ----------
 def _get_row_by_dmu(df: pd.DataFrame, dmu: str) -> pd.DataFrame:
     """Devuelve la fila correspondiente a la DMU sin lanzar KeyError."""
@@ -25,6 +25,7 @@ def _get_row_by_dmu(df: pd.DataFrame, dmu: str) -> pd.DataFrame:
         return df.loc[mask]
     return pd.DataFrame()  # no encontrada
 
+
 # ---------- UI principal ----------
 st.set_page_config(page_title="DEA Deliberativo MVP", layout="wide")
 st.title("DEA Deliberativo – MVP")
@@ -36,6 +37,11 @@ upload = st.file_uploader("Sube tu CSV", type="csv")
 
 if upload:
     df = pd.read_csv(upload)
+
+    # — Si no existe "DMU", pero sí "DMU_ID", renombramos/duplicamos para unificar —
+    if "DMU" not in df.columns and "DMU_ID" in df.columns:
+        df["DMU"] = df["DMU_ID"]
+
     st.subheader("Vista previa")
     st.dataframe(df.head(), use_container_width=True)
 
@@ -107,7 +113,7 @@ if upload:
             st.json(result)
 
     # ------------------------------------------------------------------
-    # 2.1. NUEVO: Sugerir alternativas de Inputs/Outputs
+    # 2.1. Sugerir alternativas de Inputs/Outputs (nuevo)
     # ------------------------------------------------------------------
     if st.button("Sugerir alternativas de Inputs/Outputs"):
         if not inputs or not outputs:
@@ -118,6 +124,8 @@ if upload:
                 inputs=inputs,
                 outputs=outputs
             )
+            # Guardamos la última recomendación en sesión
+            st.session_state["last_reco"] = rec
             if rec.get("recommend_inputs") is not None:
                 st.subheader("Recomendaciones de Inputs")
                 st.write(rec["recommend_inputs"])
@@ -196,8 +204,7 @@ if upload:
             st.plotly_chart(hist_fig, use_container_width=True)
 
         # B) Scatter 3D inputs vs outputs
-        # Verificar que los listados 'inputs' y 'outputs' aún existen
-        if "inputs" in locals() and "outputs" in locals() and len(inputs) >= 2 and len(outputs) >= 1:
+        if len(inputs) >= 2 and len(outputs) >= 1:
             with st.expander("🔍 Scatter 3D Inputs vs Output (coloreado por eficiencia)"):
                 try:
                     scatter3d_fig = plot_3d_inputs_outputs(df, inputs, outputs, dea_df)
@@ -214,11 +221,9 @@ if upload:
             else:
                 selected_dmu = st.selectbox("Elige DMU para spider", dea_df["DMU"])
                 try:
-                    # Fusionamos para obtener inputs+outputs junto con efficiency y DMU
+                    # Unimos dea_df (que ya tiene columna 'DMU') con df original
                     merged_for_spider = dea_df.merge(
-                        df[inputs + outputs + (["DMU"] if "DMU" in df.columns else [])],
-                        on="DMU",
-                        how="left"
+                        df, on="DMU", how="left"
                     )
                     spider_fig = plot_benchmark_spider(
                         merged_for_spider,
@@ -238,6 +243,7 @@ if upload:
             st.subheader("Generar Complejo de Indagación")
             dmu = st.selectbox("DMU ineficiente", ineff_df["DMU"])
 
+            # Definimos sliders con límites razonables
             depth = st.slider(
                 "Niveles del árbol",
                 min_value=2,
@@ -283,17 +289,19 @@ if upload:
                         temperature=0.3,
                     )
 
-                # Guardamos el árbol y los parametros depth/breadth en sesión
+                # Guardamos el árbol y los parámetros depth/breadth en sesión
                 st.session_state["last_tree"] = tree
                 st.session_state["last_depth"] = depth
                 st.session_state["last_breadth"] = breadth
+                st.session_state["last_dmu"] = dmu
                 st.success("✅ Árbol generado correctamente")
 
         # 4.5 Mostrar árbol si existe
         if "last_tree" in st.session_state:
             tree = st.session_state["last_tree"]
-            saved_depth = st.session_state.get("last_depth", 3)
-            saved_breadth = st.session_state.get("last_breadth", 3)
+            depth = st.session_state.get("last_depth", 2)
+            breadth = st.session_state.get("last_breadth", 2)
+            dmu = st.session_state.get("last_dmu", None)
 
             st.subheader("Árbol de Indagación (último generado)")
             st.plotly_chart(to_plotly_tree(tree), use_container_width=True)
@@ -319,11 +327,7 @@ if upload:
             # 4.7 Cálculo y visualización del EEE
             from epistemic_metrics import compute_eee
 
-            eee_score = compute_eee(
-                tree,
-                depth_limit=saved_depth,
-                breadth_limit=saved_breadth
-            )
+            eee_score = compute_eee(tree, depth_limit=depth, breadth_limit=breadth)
             st.metric(label="Índice de Equilibrio Erotético (EEE)", value=eee_score)
 
             # 4.8 Exportaciones (CSV/JSON y reporte HTML)
@@ -362,8 +366,8 @@ if upload:
                 "model": model,
                 "orientation": orientation,
                 "super_eff": super_eff,
-                "depth": saved_depth,
-                "breadth": saved_breadth,
+                "depth": depth,
+                "breadth": breadth,
                 "EEE_score": eee_score,
             }
             df_eee = pd.DataFrame.from_records([eee_meta])
