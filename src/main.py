@@ -37,6 +37,9 @@ upload = st.file_uploader("Sube tu CSV", type="csv")
 
 if upload:
     df = pd.read_csv(upload)
+    # ← NUEVO: guardar el DataFrame original en session_state
+    st.session_state["original_df"] = df
+
     st.subheader("Vista previa")
     st.dataframe(df.head(), use_container_width=True)
 
@@ -162,6 +165,9 @@ if upload:
         st.session_state["dea_model"] = model
         st.session_state["dea_orientation"] = orientation
         st.session_state["dea_super_eff"] = super_eff
+        # ← NUEVO: guardar también inputs/outputs originales
+        st.session_state["dea_inputs"] = inputs
+        st.session_state["dea_outputs"] = outputs
 
         st.success("✅ DEA calculado correctamente")
 
@@ -173,6 +179,8 @@ if upload:
         model = st.session_state["dea_model"]
         orientation = st.session_state["dea_orientation"]
         super_eff = st.session_state["dea_super_eff"]
+        inputs = st.session_state["dea_inputs"]
+        outputs = st.session_state["dea_outputs"]
 
         # 4.1 Tabla de eficiencias
         st.subheader(f"Resultados DEA ({model}-{orientation})")
@@ -282,6 +290,20 @@ if upload:
                 # Guardamos el árbol en sesión
                 st.session_state["last_tree"] = tree
                 st.success("✅ Árbol generado correctamente")
+
+                # ← NUEVO: calcular diagnóstico y recomendaciones, y guardarlas
+                # Supongamos que tienes una función _auto_diagnose_and_recommend(...) que devuelve (df_diag, reco)
+                # Tendrás que implementarla en tu código base para “diagnosticar” usando el árbol.
+                try:
+                    from diagnostics import _auto_diagnose_and_recommend
+                    df_diag, reco = _auto_diagnose_and_recommend(
+                        df, dea_df, tree, inputs, outputs, model, orientation, super_eff
+                    )
+                    # Guarda las recomendaciones en sesión
+                    st.session_state["last_reco"] = reco
+                except ImportError:
+                    # Si no tienes aun esa función, al menos aseguramos que last_reco exista como vacío
+                    st.session_state["last_reco"] = {}
 
         # 4.5 Mostrar árbol si existe
         if "last_tree" in st.session_state:
