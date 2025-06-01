@@ -21,6 +21,9 @@ def run_stochastic_dea(
     Retorna DataFrame con:
       DMU, eff_mean, ci_lower, ci_upper, original_efficiency
     """
+    if dmu_column not in df.columns:
+        raise ValueError(f"La columna DMU '{dmu_column}' no existe en el DataFrame.")
+
     # 1) Validar positividad
     cols = input_cols + output_cols
     validate_positive_dataframe(df, cols)
@@ -39,14 +42,14 @@ def run_stochastic_dea(
 
     # 3) Bootstrapping
     bootstrap_vals = {dmu: [] for dmu in dmus}
-    for b in range(n_bootstrap):
-        # re-muestrear con reemplazo
+    for _ in range(n_bootstrap):
+        # Re-muestrear con reemplazo
         df_b = df.sample(n=n, replace=True).reset_index(drop=True)
         Xb = df_b[input_cols].to_numpy().T
         Yb = df_b[output_cols].to_numpy().T
 
         for i, dmu in enumerate(dmus):
-            # encontrar índice de la DMU en la muestra bootstrapped
+            # Encontrar índice de la DMU en la muestra bootstrapped
             indices = df_b.index[df_b[dmu_column] == dmu].tolist()
             if not indices:
                 continue
