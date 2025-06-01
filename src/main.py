@@ -4,7 +4,7 @@ import streamlit as st
 import pandas as pd
 
 from data_validator import validate
-from results import mostrar_resultados, plot_benchmark_spider, plot_slack_waterfall
+from results import mostrar_resultados, plot_benchmark_spider
 from report_generator import generate_html_report, generate_excel_report, generate_pptx_report
 from session_manager import init_db, save_session, load_sessions
 
