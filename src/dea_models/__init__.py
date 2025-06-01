@@ -10,6 +10,8 @@ from .window_analysis import run_window_dea
 from .stochastic import run_stochastic_dea, bootstrap_efficiencies
 from .auto_tuner import generate_candidates, evaluate_candidates
 from .visualizations import plot_benchmark_spider
+from .visualizations import plot_slack_waterfall
+
 
 
 
