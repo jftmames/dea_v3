@@ -7,10 +7,18 @@ import plotly.graph_objects as go
 from dea_models.radial import run_ccr, run_bcc
 
 
-def mostrar_resultados(df: pd.DataFrame, dmu_column: str, inputs: list[str], outputs: list[str]):
+def mostrar_resultados(
+    df: pd.DataFrame,
+    dmu_column: str,
+    inputs: list[str],
+    outputs: list[str]
+) -> dict:
     """
-    Ejecuta los modelos CCR y BCC sobre el DataFrame proporcionado, mostrando resultados
-    y devolviendo un dict con DataFrames y figuras para su posterior uso.
+    Ejecuta los modelos CCR y BCC sobre el DataFrame proporcionado, devuelve:
+      - df_ccr, df_bcc: resultados de eficiencias
+      - merged_ccr, merged_bcc: unión con df original para visualizaciones
+      - hist_ccr, hist_bcc: figura de histograma de eficiencias
+      - scatter3d_ccr, scatter3d_bcc: figura 3D inputs/outputs coloreado por eficiencia
     """
     # 1) Ejecutar CCR
     df_ccr = run_ccr(
@@ -33,8 +41,8 @@ def mostrar_resultados(df: pd.DataFrame, dmu_column: str, inputs: list[str], out
     )
 
     # 3) Unir resultados de eficiencia con df original
-    merged_ccr = df_ccr.merge(df, on="DMU", how="left")
-    merged_bcc = df_bcc.merge(df, on="DMU", how="left")
+    merged_ccr = df_ccr.merge(df, on=dmu_column, how="left")
+    merged_bcc = df_bcc.merge(df, on=dmu_column, how="left")
 
     # 4) Crear figuras
     hist_ccr = plot_efficiency_histogram(df_ccr)
@@ -43,8 +51,7 @@ def mostrar_resultados(df: pd.DataFrame, dmu_column: str, inputs: list[str], out
     scatter3d_ccr = plot_3d_inputs_outputs(df, inputs, outputs, df_ccr)
     scatter3d_bcc = plot_3d_inputs_outputs(df, inputs, outputs, df_bcc)
 
-    # 5) Empaquetar todo en un dict
-    resultados = {
+    return {
         "df_ccr": df_ccr,
         "df_bcc": df_bcc,
         "merged_ccr": merged_ccr,
@@ -54,7 +61,6 @@ def mostrar_resultados(df: pd.DataFrame, dmu_column: str, inputs: list[str], out
         "scatter3d_ccr": scatter3d_ccr,
         "scatter3d_bcc": scatter3d_bcc,
     }
-    return resultados
 
 
 def plot_efficiency_histogram(dea_df: pd.DataFrame, bins: int = 20):
@@ -81,17 +87,14 @@ def plot_3d_inputs_outputs(
 ):
     """
     Scatter 3D: ejes = primeros 2 inputs, tercer eje = primer output,
-    coloreado según eficiencia. 'dea_df' debe tener columnas 'DMU' y 'efficiency'.
+    coloreado según eficiencia. 'dea_df' debe tener columnas dmu_column y 'efficiency'.
     """
-    # Uno dea_df con orig_df para obtener valores de inputs/outputs
     merged = dea_df.merge(orig_df, on="DMU", how="left")
 
-    # Seleccionamos primeras 2 columnas de inputs y la primera de outputs
     x_col = inputs[0]
     y_col = inputs[1] if len(inputs) >= 2 else inputs[0]
     z_col = outputs[0]
 
-    # Validar existencia de columnas
     if x_col not in merged.columns or y_col not in merged.columns or z_col not in merged.columns:
         raise ValueError(f"Columnas {x_col}, {y_col} o {z_col} no existen en los datos combinados.")
 
@@ -120,29 +123,22 @@ def plot_benchmark_spider(
     merged_for_spider: DataFrame con columnas 'DMU', all inputs, all outputs y 'efficiency'.
     selected_dmu: identificador de la DMU a plotear.
     """
-    # Filtrar DMUs eficientes (efficiency == 1)
     efficient_peers = merged_for_spider.query("efficiency == 1")
     if efficient_peers.empty:
         raise ValueError("No hay DMU eficientes para benchmark.")
 
-    # Variables a comparar (inputs + outputs)
     vars_all = inputs + outputs
-
-    # Promedio de peers eficientes
     peer_means = efficient_peers[vars_all].mean()
 
-    # Valores de la DMU seleccionada
     sel_row = merged_for_spider.loc[merged_for_spider["DMU"] == selected_dmu]
     if sel_row.empty:
         raise ValueError(f"No existe la DMU '{selected_dmu}' en merged_for_spider.")
     sel_values = sel_row.iloc[0][vars_all]
 
-    # Cerrar ciclo para radar
     categories = vars_all + [vars_all[0]]
     peer_vals = peer_means.tolist() + [peer_means.tolist()[0]]
     sel_vals = sel_values.tolist() + [sel_values.tolist()[0]]
 
-    # DataFrame para Plotly
     df_spider = pd.DataFrame({
         "variable": categories * 2,
         "valor": peer_vals + sel_vals,
