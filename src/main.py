@@ -24,7 +24,7 @@ st.set_page_config(page_title="DEA Deliberativo MVP", layout="wide")
 st.title("DEA Deliberativo – MVP")
 
 # ------------------------------------------------------------------
-# 1. Cargar CSV
+# 1. Cargar CSV (área principal)
 # ------------------------------------------------------------------
 upload = st.file_uploader("Sube tu CSV", type="csv")
 
@@ -33,20 +33,64 @@ if upload:
     st.subheader("Vista previa")
     st.dataframe(df.head(), use_container_width=True)
 
+    # Validar que al menos haya 2 DMU si esperan usar BCC o super-eficiencia
+    num_dmu = df.shape[0]
+
     # solo columnas numéricas para Inputs / Outputs
     numeric_cols = df.select_dtypes(include="number").columns.tolist()
     if not numeric_cols:
         st.error("⚠️ El archivo no contiene columnas numéricas.")
         st.stop()
 
-    st.markdown("### Selecciona columnas de **inputs** y **outputs**")
-    st.info("⚠️ Solo columnas numéricas funcionarán en DEA.")
+    # ------------------------------------------------------------------
+    # Sidebar: controles de inputs/outputs y parámetros DEA
+    # ------------------------------------------------------------------
+    with st.sidebar:
+        st.markdown("## Parámetros de entrada")
 
-    inputs = st.multiselect("Inputs", numeric_cols, default=numeric_cols[:-1])
-    outputs = st.multiselect("Outputs", numeric_cols, default=[numeric_cols[-1]])
+        inputs = st.multiselect(
+            "Inputs",
+            numeric_cols,
+            default=numeric_cols[:-1],
+            help="Columnas numéricas que actúan como insumos."
+        )
+        outputs = st.multiselect(
+            "Outputs",
+            numeric_cols,
+            default=[numeric_cols[-1]],
+            help="Columnas numéricas que actúan como productos."
+        )
+
+        st.markdown("## Configuración DEA")
+        model = st.selectbox(
+            "Modelo",
+            ["CCR", "BCC"],
+            index=0,
+            help="CCR = retornos constantes (CRS); BCC = retornos variables (VRS)."
+        )
+        orientation = st.selectbox(
+            "Orientación",
+            ["input", "output"],
+            index=0,
+            help="input-oriented minimiza insumos; output-oriented maximiza productos."
+        )
+        super_eff = st.checkbox(
+            "Super-eficiencia",
+            value=False,
+            help="Excluye la DMU actual del conjunto de comparación."
+        )
+
+        st.markdown("---")
+        st.markdown("**Validaciones automáticas:**")
+        if model == "BCC" and num_dmu < 2:
+            st.error("Para BCC se necesitan al menos 2 DMU.")
+        if super_eff and num_dmu < 2:
+            st.error("Para super-eficiencia se necesitan al menos 2 DMU.")
+
+        run_button = st.button(f"Ejecutar DEA ({model}-{orientation})")
 
     # ------------------------------------------------------------------
-    # 2. Validación de datos
+    # 2. Validación de datos (área principal)
     # ------------------------------------------------------------------
     if st.button("Validar datos"):
         result = validate(df, inputs, outputs)
@@ -54,37 +98,18 @@ if upload:
         st.json(result)
 
     # ------------------------------------------------------------------
-    # 3. Parámetros de DEA: modelo, orientación y super-eficiencia
+    # 3. Ejecutar DEA
     # ------------------------------------------------------------------
-    st.markdown("### Configuración del modelo DEA")
-    col1, col2, col3 = st.columns(3)
+    if run_button:
+        # Revalidar antes de ejecutar
+        if model == "BCC" and num_dmu < 2:
+            st.error("No se puede ejecutar BCC con menos de 2 DMU.")
+            st.stop()
+        if super_eff and num_dmu < 2:
+            st.error("No se puede ejecutar super-eficiencia con menos de 2 DMU.")
+            st.stop()
 
-    with col1:
-        model = st.selectbox(
-            "Modelo",
-            ["CCR", "BCC"],
-            index=0,
-            help="CCR = retornos constantes (CRS); BCC = retornos variables (VRS)"
-        )
-    with col2:
-        orientation = st.selectbox(
-            "Orientación",
-            ["input", "output"],
-            index=0,
-            help="input-oriented o output-oriented"
-        )
-    with col3:
-        super_eff = st.checkbox(
-            "Super-eficiencia",
-            value=False,
-            help="Excluir DMU actual para super-eficiencia"
-        )
-
-    # ------------------------------------------------------------------
-    # 4. Ejecutar DEA
-    # ------------------------------------------------------------------
-    if st.button(f"Ejecutar DEA ({model}-{orientation})"):
-        with st.spinner("Optimizando…"):
+        with st.spinner(f"Optimizando DEA ({model}-{orientation})…"):
             try:
                 res = run_dea(
                     df,
@@ -101,27 +126,27 @@ if upload:
                 st.error(f"❌ {e}")
                 st.stop()
 
-        # Guardamos en session_state el DataFrame y los parámetros usados
+        # Guardamos en session_state el DataFrame y parámetros
         st.session_state["res_df"] = res
         st.session_state["dea_model"] = model
         st.session_state["dea_orientation"] = orientation
         st.session_state["dea_super_eff"] = super_eff
 
     # ------------------------------------------------------------------
-    # 5. Mostrar Resultados DEA y habilitar exportaciones, árbol y EEE
+    # 4. Mostrar Resultados DEA y habilitar exportaciones, árbol y EEE
     # ------------------------------------------------------------------
     if "res_df" in st.session_state:
         dea_df = st.session_state["res_df"]
-        # Leemos los parámetros de session_state
+        # Leemos los parámetros desde session_state
         model = st.session_state["dea_model"]
         orientation = st.session_state["dea_orientation"]
         super_eff = st.session_state["dea_super_eff"]
 
-        # 5.1 Mostrar tabla de eficiencias
+        # 4.1 Mostrar tabla de eficiencias
         st.subheader(f"Resultados DEA ({model}-{orientation})")
         st.dataframe(dea_df, use_container_width=True)
 
-        # 5.2 Botón para exportar DEA a CSV
+        # 4.2 Botón para exportar resultados DEA a CSV
         csv_dea = dea_df.to_csv(index=False).encode("utf-8")
         st.download_button(
             label="📥 Descargar resultados DEA (CSV)",
@@ -130,7 +155,7 @@ if upload:
             mime="text/csv",
         )
 
-        # 5.3 Filtrar DMU ineficientes
+        # 4.3 Filtrar DMU ineficientes
         ineff_df = dea_df.query("efficiency < 1")
         if len(ineff_df) == 0:
             st.info("Todas las DMU son eficientes.")
@@ -138,18 +163,29 @@ if upload:
             st.subheader("Generar Complejo de Indagación")
             dmu = st.selectbox("DMU ineficiente", ineff_df["DMU"])
 
-            depth = st.slider("Niveles", 2, 4, 3)
-            breadth = st.slider("Subpreguntas / nodo", 3, 8, 5)
+            depth = st.slider(
+                "Niveles del árbol",
+                min_value=2,
+                max_value=4,
+                value=3,
+                help="Cantidad de niveles jerárquicos en el árbol."
+            )
+            breadth = st.slider(
+                "Subpreguntas / nodo",
+                min_value=3,
+                max_value=8,
+                value=5,
+                help="Máximo número de hijos por nodo."
+            )
 
             if st.button("Crear árbol"):
-
-                # localizar la fila de la DMU
+                # localizamos la fila de la DMU
                 row = _get_row_by_dmu(df, dmu)
                 if row.empty:
                     st.error(f"No se encontró la DMU '{dmu}' en el DataFrame original.")
                     st.stop()
 
-                # contexto rico para el modelo
+                # contexto rico para la IA
                 context = {
                     "dmu": dmu,
                     "inputs": {c: float(row[c].values[0]) for c in inputs},
@@ -172,17 +208,18 @@ if upload:
                         temperature=0.3,
                     )
 
-                # 5.4 Mostrar árbol y JSON
+                # 4.4 Mostrar árbol y JSON completo
                 st.plotly_chart(to_plotly_tree(tree), use_container_width=True)
                 with st.expander("JSON completo"):
                     st.json(tree)
 
-                # 5.5 Cálculo y visualización del EEE
+                # 4.5 Cálculo y visualización del EEE
                 from epistemic_metrics import compute_eee
+
                 eee_score = compute_eee(tree, depth_limit=depth, breadth_limit=breadth)
                 st.metric(label="Índice de Equilibrio Erotético (EEE)", value=eee_score)
 
-                # 5.6 Exportaciones CSV y HTML
+                # 4.6 Exportaciones (CSV/JSON y reporte HTML)
                 # A) Aplanar el árbol para CSV
                 def _flatten_tree(tree: dict, parent: str = "") -> list[tuple[str, str]]:
                     rows = []
@@ -202,7 +239,17 @@ if upload:
                     mime="text/csv",
                 )
 
-                # B) CSV con metadatos EEE
+                # B) Descargar árbol en JSON
+                import json
+                json_tree = json.dumps(tree, ensure_ascii=False, indent=2).encode("utf-8")
+                st.download_button(
+                    label="📥 Descargar árbol (JSON)",
+                    data=json_tree,
+                    file_name="inquiry_tree.json",
+                    mime="application/json",
+                )
+
+                # C) CSV con metadatos EEE
                 eee_meta = {
                     "DMU": dmu,
                     "model": model,
@@ -221,8 +268,9 @@ if upload:
                     mime="text/csv",
                 )
 
-                # C) Reporte HTML completo
+                # D) Reporte HTML completo
                 from report_generator import generate_html_report
+
                 html_report = generate_html_report(
                     df_dea=dea_df, df_tree=df_tree, df_eee=df_eee
                 )
