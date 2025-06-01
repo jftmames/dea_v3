@@ -50,3 +50,29 @@ def check_zero_negative_data(df: pd.DataFrame, columns: list[str]):
     """
     return validate_dataframe(df, columns, columns, allow_zero=True, allow_negative=False)
 
+
+def format_lambda_table(lambda_dicts: list[dict[str, float]]) -> pd.DataFrame:
+    """
+    Toma una lista de dicts, uno por cada DMU, con pesos {peer: lambda}.
+    Retorna DataFrame con columnas [DMU, peer1, peer2, ..., peerN].
+    lambda_dicts[i] corresponde a la fila de DMU i en orden.
+    """
+    if not lambda_dicts:
+        return pd.DataFrame()
+
+    # Obtener lista de DMUs a partir de las claves del primer dict
+    dmus = list(lambda_dicts[0].keys())
+
+    # Construir filas: cada dict mapea peer->lambda
+    rows = []
+    for lam in lambda_dicts:
+        rows.append({peer: lam.get(peer, 0.0) for peer in dmus})
+
+    # Crear DataFrame con índice igual a los nombres de las DMUs
+    df = pd.DataFrame(rows, index=dmus)
+
+    # Resetear índice para convertir la columna de DMU en una columna normal
+    df.reset_index(inplace=True)
+    df.rename(columns={"index": "DMU"}, inplace=True)
+
+    return df
