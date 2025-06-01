@@ -24,3 +24,22 @@ if upload:
         st.dataframe(res)
 else:
     st.write("Carga un CSV para comenzar")
+
+from inquiry_engine import generate_inquiry, to_plotly_tree
+
+if 'res_df' not in st.session_state and 'res' in locals():
+    st.session_state['res_df'] = res
+
+if 'res_df' in st.session_state:
+    st.subheader("Generar Complejo de Indagación")
+    dmu = st.selectbox(
+        "Selecciona una DMU ineficiente",
+        st.session_state['res_df'].query("efficiency < 1")["DMU"].tolist()
+    )
+    if st.button("Crear árbol"):
+        root_q = f"¿Por qué la DMU {dmu} es ineficiente?"
+        tree = generate_inquiry(root_q)
+        fig = to_plotly_tree(tree)
+        st.plotly_chart(fig, use_container_width=True)
+        st.json(tree)
+
