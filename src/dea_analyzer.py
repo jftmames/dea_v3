@@ -4,6 +4,11 @@ import pandas as pd
 
 
 # ------------------------------------------------------------------
+def run_dea_with_progress(df, inputs, outputs, progress):
+    res_df = run_dea(...)  # llama la función actual
+    progress.progress(1.0, text="Completado")
+    return res_df
+
 def _safe_numeric(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
     """Convierte a float y, si alguna celda es NaN, lanza ValueError (no suprime columnas)."""
     bad_cols = []
