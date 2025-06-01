@@ -44,6 +44,11 @@ if upload:
         
 if st.button("Ejecutar DEA (CCR input)"):
     try:
+        with st.spinner("Optimizando..."):
+            # progress bar
+            progress = st.progress(0.0)
+            res = run_dea_with_progress(df, inputs, outputs, progress)
+    try:
         res = run_dea(df, inputs, outputs, model="CCR")
     except ValueError as e:           # conversión o NaN
         st.error(f"❌ {e}")
