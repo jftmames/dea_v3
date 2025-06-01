@@ -66,17 +66,19 @@ if validacion["formal_issues"]:
 else:
     st.success("Validación formal OK")
 
-# Mostrar sugerencias del LLM si las hay
-if "issues" in validacion["llm"] and validacion["llm"]["issues"]:
-    st.warning("Sugerencias del LLM:")
-    st.json(validacion["llm"])
+# Mostrar sugerencias del LLM (o error)
+llm_json = validacion["llm"]
+if "error" in llm_json:
+    st.warning(f"Error al consultar LLM: {llm_json['message']}")
+else:
+    st.json(llm_json)
 
 # 5) Ejecución de DEA y visualizaciones
 if st.button("Ejecutar DEA (CCR y BCC)"):
     with st.spinner("Calculando eficiencias…"):
         resultados = mostrar_resultados(df, dmu_col, input_cols, output_cols)
 
-    # Mostrar tablas de eficiencia
+    # Mostrar tablas de eficacia
     st.subheader("Tabla de Eficiencias CCR")
     st.dataframe(resultados["df_ccr"])
 
