@@ -6,17 +6,12 @@ from typing import Any, Dict, Optional
 from openai import OpenAI
 import plotly.graph_objects as go
 
-# ------------------------------------------------------------------
-# 0. Cliente OpenAI
-# ------------------------------------------------------------------
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# ------------------------------------------------------------------
-# 1. Esquema mínimo para function-calling (siempre válido)
-# ------------------------------------------------------------------
+# ---- tool schema, minimal y siempre válido ----
 FUNCTION_SPEC = {
     "name": "return_tree",
-    "description": "Devuelve un árbol jerárquico de subpreguntas DEA.",
+    "description": "Árbol jerárquico de subpreguntas DEA.",
     "parameters": {
         "type": "object",
         "properties": {
@@ -30,9 +25,7 @@ FUNCTION_SPEC = {
     },
 }
 
-# ------------------------------------------------------------------
-# 2. Utilidad: convertir dict en Treemap Plotly
-# ------------------------------------------------------------------
+# ---- util para Plotly ----
 def to_plotly_tree(tree: Dict[str, Any]):
     labels, parents = [], []
 
@@ -46,61 +39,81 @@ def to_plotly_tree(tree: Dict[str, Any]):
     walk(tree)
     return go.Figure(go.Treemap(labels=labels, parents=parents, branchvalues="total"))
 
-# ------------------------------------------------------------------
-# 3. Generador principal (contexto opcional + triple robustez)
-# ------------------------------------------------------------------
+# ---- generador con contexto y triple-fallback ----
 def generate_inquiry(
     root_question: str,
     context: Optional[Dict[str, Any]] = None,
-    depth: int = 2,
-    breadth: int = 4,
-    temperature: float = 0.0,       # <—
+    depth: int = 3,
+    breadth: int = 5,
+    temperature: float = 0.3,
 ) -> Dict[str, Any]:
-    ...
+    """
+    Devuelve un árbol siempre no vacío:
+      1) function-calling            → JSON garantía
+      2) parse JSON del texto        → si no se invoca la función
+      3) placeholder enriquecido     → si todo falla / vacío
+    """
+    ctx = f"Contexto:\n{json.dumps(context, indent=2)}\n\n" if context else ""
+    user_prompt = (
+        ctx
+        + f"{root_question}\n\n"
+        "Genera un *árbol JSON* con al menos 2 causas principales de ineficiencia. "
+        f"Máx {depth} niveles y {breadth} subpreguntas por nodo. "
+        "Si los datos son incompletos, infiere hipótesis típicas: "
+        "exceso de inputs, déficit de outputs, benchmarking, entorno regulatorio."
+    )
+
     resp = client.chat.completions.create(
         model="gpt-4o",
         messages=[{"role": "user", "content": user_prompt}],
         tools=[{"type": "function", "function": FUNCTION_SPEC}],
         tool_choice="auto",
-        temperature=temperature,    # <—
-    )
-    ...
-
-
-    # ---- 1) Function-calling ----
-    resp = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[{"role": "user", "content": user_prompt}],
-        tools=[{"type": "function", "function": FUNCTION_SPEC}],
-        tool_choice="auto",
-        temperature=0,
+        temperature=temperature,
     )
 
-    # a) Si llamó a la función → parsear arguments
+    # a) intentamos function-calling
     if resp.choices[0].message.tool_calls:
-        args_json = resp.choices[0].message.tool_calls[0].function.arguments
+        args = resp.choices[0].message.tool_calls[0].function.arguments
         try:
-            data = json.loads(args_json)
+            data = json.loads(args)
             tree = data.get("tree", data)
-            if tree:
+            if _tree_is_valid(tree):
                 return tree
         except json.JSONDecodeError:
-            pass  # continuará al fallback de texto
+            pass
 
-    # b) Fallback: intentar JSON en contenido textual
+    # b) intentamos parsear texto (JSON plain)
     raw = resp.choices[0].message.content.strip()
     try:
         tree = json.loads(raw)
-        if tree:
+        if _tree_is_valid(tree):
             return tree
     except Exception:
         pass
 
-    # ---- 3) Placeholder si todo falla ----
-    return _placeholder_tree(root_question)
+    # c) placeholder enriquecido
+    return _fallback_tree(root_question)
 
-# ------------------------------------------------------------------
-# 4. Placeholder para no romper la app
-# ------------------------------------------------------------------
-def _placeholder_tree(root_q: str) -> Dict[str, Any]:
-    return {root_q: {"ℹ️": "No se pudo generar subpreguntas"}}
+# ---- helpers ----
+def _tree_is_valid(tree: Dict[str, Any]) -> bool:
+    if not tree:
+        return False
+    first_key = next(iter(tree))
+    # árbol válido si no es placeholder y tiene al menos 2 subnodos o un subnivel
+    return not ("ℹ️" in tree.get(first_key, {})) and (
+        len(tree[first_key]) >= 2 or any(isinstance(v, dict) for v in tree[first_key].values())
+    )
+
+def _fallback_tree(root_q: str) -> Dict[str, Any]:
+    return {
+        root_q: {
+            "¿Exceso de inputs?": {
+                "¿Qué input consume más que los peers?": {},
+                "¿Se puede reducir un 10 % sin afectar output?": {},
+            },
+            "¿Déficit de outputs?": {
+                "¿Output clave por debajo de la media eficiente?": {},
+                "¿Implementar benchmarking con DMU eficiente?": {},
+            },
+        }
+    }
