@@ -138,6 +138,10 @@ if upload:
     # ------------------------------------------------------------------
     # 3. Ejecutar DEA
     # ------------------------------------------------------------------
+    st.session_state["orig_df"] = df
+    st.session_state["inputs"] = inputs
+    st.session_state["outputs"] = outputs
+
     if run_button:
         # Revalidar antes de ejecutar
         if model == "BCC" and num_dmu < 2:
