@@ -5,13 +5,11 @@ import json
 import pandas as pd
 from openai import OpenAI
 
-# Importamos la nueva función de validación de dea_models/utils.py
+# Importamos la función de validación de dea_models/utils.py
 from dea_models.utils import validate_positive_dataframe
 
-# (Opcional) Si en algún momento quisiéramos ejecutar DEA directamente aquí:
-from dea_models.radial import run_ccr, run_bcc
-
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
 
 # ---------- reglas formales básicas ----------
 def _formal_checks(
@@ -21,30 +19,28 @@ def _formal_checks(
 ) -> list[str]:
     """
     Verifica reglas básicas:
-      1. Que los valores en columnas inputs/outputs sean numéricos y > 0.
+      1. Que las columnas inputs+outputs existan y sean numéricas > 0.
       2. Que no existan valores nulos en esas columnas.
-      3. Recolecta mensajes de error en formato de lista de strings.
+      3. Devuelve una lista de mensajes de error si hay problemas.
     """
     issues = []
 
-    # 1) Chequear que las columnas inputs+outputs existan y sean numéricas > 0
+    # 1) Validar positividad y conversión a float usando validate_positive_dataframe
     try:
-        # Antes usábamos _safe_numeric(df, cols). Ahora:
         cols = inputs + outputs
         validate_positive_dataframe(df, cols)
     except ValueError as e:
         issues.append(str(e))
 
-    # 2) Valores nulos en TODO el DataFrame
+    # 2) Valores nulos en todo el DataFrame
     if df.isnull().values.any():
         issues.append("Se encontraron valores nulos en el DataFrame.")
 
-    # 3) Columnas no numéricas (fuera de inputs/outputs, opcional)
+    # 3) Columnas no numéricas (fuera de inputs/outputs)
     for col in df.columns:
-        if not pd.api.types.is_numeric_dtype(df[col]):
-            # Si la columna es “DMU” (identificador), la omitimos
-            if col not in inputs + outputs:
-                issues.append(f"Columna '{col}' no es numérica.")
+        if col not in inputs + outputs and not pd.api.types.is_numeric_dtype(df[col]):
+            issues.append(f"Columna '{col}' no es numérica.")
+
     return issues
 
 
@@ -97,9 +93,8 @@ def validate(
     return {"formal_issues": formal_issues, "llm": llm_json}
 
 
-# ---------- EJEMPLO DE USO (opcional) ----------
+# ---------- Ejemplo de uso rápido (opcional) ----------
 if __name__ == "__main__":
-    # Ejemplo rápido de cómo validar y luego correr CCR/BCC si todo está okay:
     df_ejemplo = pd.DataFrame({
         "DMU": ["A", "B", "C"],
         "input1": [1.0, 2.0, 3.0],
@@ -110,26 +105,4 @@ if __name__ == "__main__":
     outputs = ["output1"]
 
     resultado_validacion = validate(df_ejemplo, inputs, outputs)
-    print("Validación formal y LLM:", resultado_validacion)
-
-    if not resultado_validacion["formal_issues"]:
-        # Si no hay issues formales, podemos ejecutar DEA:
-        df_ccr = run_ccr(
-            df=df_ejemplo,
-            dmu_column="DMU",
-            input_cols=inputs,
-            output_cols=outputs,
-            orientation="input",
-            super_eff=False
-        )
-        print("\nResultados CCR:\n", df_ccr)
-
-        df_bcc = run_bcc(
-            df=df_ejemplo,
-            dmu_column="DMU",
-            input_cols=inputs,
-            output_cols=outputs,
-            orientation="input",
-            super_eff=False
-        )
-        print("\nResultados BCC:\n", df_bcc)
+    print("Validación formal y RAG:", resultado_validacion)
