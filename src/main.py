@@ -61,20 +61,44 @@ if st.button("Ejecutar DEA (CCR input)"):
 # ------------------------------------------------------------------
 # 4. Complejos de Indagación
 # ------------------------------------------------------------------
+from inquiry_engine import generate_inquiry, to_plotly_tree
+
+# … después de calcular res_df …
+
 if "res_df" in st.session_state:
-    ineff = st.session_state["res_df"].query("efficiency < 1")
-    if len(ineff) == 0:
-        st.info("Todas las DMU son eficientes; no hay árbol de indagación que generar.")
+    ineff_df = st.session_state["res_df"].query("efficiency < 1")
+    if len(ineff_df) == 0:
+        st.info("Todas las DMU son eficientes.")
     else:
         st.subheader("Generar Complejo de Indagación")
-        dmu = st.selectbox("Selecciona una DMU ineficiente", ineff["DMU"].tolist())
+        dmu = st.selectbox("DMU ineficiente", ineff_df["DMU"])
+
+        depth = st.slider("Niveles", 2, 4, 3)
+        breadth = st.slider("Subpreguntas / nodo", 3, 8, 5)
 
         if st.button("Crear árbol"):
-            with st.spinner("Generando árbol con IA..."):
-                root_q = f"¿Por qué la DMU {dmu} es ineficiente?"
-                tree = generate_inquiry(root_q)
-                fig = to_plotly_tree(tree)
 
-            st.plotly_chart(fig, use_container_width=True)
-            with st.expander("JSON del árbol"):
+            # ---  contexto rico  ---
+            context = {
+                "dmu": dmu,
+                "inputs": {c: float(df.loc[df["DMU"] == dmu, c]) for c in inputs},
+                "outputs": {c: float(df.loc[df["DMU"] == dmu, c]) for c in outputs},
+                "efficiency": float(ineff_df.loc[ineff_df["DMU"] == dmu, "efficiency"]),
+                "peers": st.session_state["res_df"]
+                .query("efficiency == 1")["DMU"]
+                .tolist(),
+            }
+
+            with st.spinner("Generando árbol…"):
+                tree = generate_inquiry(
+                    f"¿Por qué la {dmu} es ineficiente?",
+                    context=context,
+                    depth=depth,
+                    breadth=breadth,
+                    temperature=0.3,   # ← un poco más creativo
+                )
+
+            st.plotly_chart(to_plotly_tree(tree), use_container_width=True)
+            with st.expander("JSON completo"):
                 st.json(tree)
+
