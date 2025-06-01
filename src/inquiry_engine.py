@@ -45,13 +45,15 @@ def generate_inquiry(root_question: str, depth: int = 2, breadth: int = 4) -> di
         f"Genera un árbol con máximo {depth} niveles y {breadth} subpreguntas por nodo."
     )
 
-    resp = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[{"role": "user", "content": user_prompt}],
-        tools=[{"type": "function", "function": FUNCTION_SPEC}],
-        tool_choice={"type": "function", "function": {"name": "return_tree"}},
-        temperature=0,
-    )
+resp = client.chat.completions.create(
+    model="gpt-4o",
+    messages=[{"role": "user", "content": user_prompt}],
+    tools=[{"type": "function", "function": FUNCTION_SPEC}],
+    tool_choice="auto",      # deja que el modelo invoque la función
+    temperature=0,
+)
 
-    args_json = resp.choices[0].message.tool_calls[0].function.arguments
-    return json.loads(args_json)
+args_json = resp.choices[0].message.tool_calls[0].function.arguments
+tree_wrapper = json.loads(args_json)          # {'tree': {...}}
+return tree_wrapper["tree"]
+
