@@ -76,17 +76,29 @@ if "res_df" in st.session_state:
         depth = st.slider("Niveles", 2, 4, 3)
         breadth = st.slider("Subpreguntas / nodo", 3, 8, 5)
 
-        if st.button("Crear árbol"):
+            if st.button("Crear árbol"):
 
-            # ---  contexto rico  ---
+            # ---------- detectar identificador ----------
+            if "DMU" in df.columns:
+                # DMU es una columna normal
+                row = df.loc[df["DMU"] == dmu]
+            else:
+                # DMU está en el índice
+                row = df.loc[[dmu]]
+
+            # ---------- contexto detallado ----------
             context = {
                 "dmu": dmu,
-                "inputs": {c: float(df.loc[df["DMU"] == dmu, c]) for c in inputs},
-                "outputs": {c: float(df.loc[df["DMU"] == dmu, c]) for c in outputs},
-                "efficiency": float(ineff_df.loc[ineff_df["DMU"] == dmu, "efficiency"]),
-                "peers": st.session_state["res_df"]
-                .query("efficiency == 1")["DMU"]
-                .tolist(),
+                "inputs": {c: float(row[c].values[0]) for c in inputs},
+                "outputs": {c: float(row[c].values[0]) for c in outputs},
+                "efficiency": float(
+                    st.session_state["res_df"].set_index("DMU").loc[dmu, "efficiency"]
+                ),
+                "peers": (
+                    st.session_state["res_df"]
+                    .query("efficiency == 1")["DMU"]
+                    .tolist()
+                ),
             }
 
             with st.spinner("Generando árbol…"):
@@ -95,10 +107,11 @@ if "res_df" in st.session_state:
                     context=context,
                     depth=depth,
                     breadth=breadth,
-                    temperature=0.3,   # ← un poco más creativo
+                    temperature=0.3,
                 )
 
             st.plotly_chart(to_plotly_tree(tree), use_container_width=True)
             with st.expander("JSON completo"):
                 st.json(tree)
+
 
