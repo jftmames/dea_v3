@@ -15,10 +15,10 @@ def _clean_json(s: str) -> str:
 
 def generate_inquiry(root_question: str, depth: int = 2, breadth: int = 4):
     prompt = (
-        "Eres analista DEA; genera árbol JSON (objetos anidados) con "
-        f"máx {depth} niveles y {breadth} subpreguntas por nodo.\n"
+        "Eres analista DEA; genera un árbol de subpreguntas en JSON puro "
+        f"(máx {depth} niveles, {breadth} subpreguntas por nodo).\n"
         f"Pregunta raíz: {root_question}\n"
-        "Devuelve SOLO JSON."
+        "No devuelvas texto extra ni markdown."
     )
     chat = client.chat.completions.create(
         model="gpt-4o",
@@ -26,11 +26,23 @@ def generate_inquiry(root_question: str, depth: int = 2, breadth: int = 4):
         temperature=0
     )
     raw = chat.choices[0].message.content.strip()
+    cleaned = _clean_json(raw)
+
+    # 1) intento JSON estándar
     try:
-        return json.loads(_clean_json(raw))
+        return json.loads(cleaned)
     except json.JSONDecodeError:
-        # fallback: intentar con literal_eval
-        return ast.literal_eval(_clean_json(raw))
+        pass
+
+    # 2) intento eval literal
+    try:
+        return ast.literal_eval(cleaned)
+    except Exception:
+        pass
+
+    # 3) fallback: devuelve diccionario plano con el texto para no romper la app
+    return {root_question: {"ERROR": "No se pudo parsear respuesta LLM", "raw": raw}}
+
 
 def to_plotly_tree(tree: dict):
     labels, parents = [], []
