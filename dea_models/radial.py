@@ -1,139 +1,79 @@
 # dea_models/radial.py
 
-"""
-Módulo radial.py: implementa los modelos CCR y BCC (radiales), basados en la lógica
-que estaba en src/dea_analyzer.py. Aquí definiremos las funciones públicas:
-- run_ccr(...)
-- run_bcc(...)
-y expondremos las utilidades mínimas necesarias para que otros módulos puedan usarlo.
-"""
-
-import pandas as pd
 import numpy as np
-# Si usabas algún solver específico (e.g., pulp, gurobi, etc.), importar aquí
-# import pulp
+import cvxpy as cp
+import pandas as pd
 
-from .utils import validate_dataframe, check_positive_data
-from .constants import DEFAULT_TOLERANCE
-
-def run_ccr(
-    df: pd.DataFrame,
-    dmu_column: str,
-    input_cols: list,
-    output_cols: list,
+# ------------------------------------------------------------------
+# 1. Núcleo DEA (CCR / BCC) — input/output orientation
+# ------------------------------------------------------------------
+def _dea_core(
+    X: np.ndarray,
+    Y: np.ndarray,
+    rts: str = "CRS",
     orientation: str = "input",
-    rts: str = "CRS"
-) -> pd.DataFrame:
+    super_eff: bool = False,
+) -> np.ndarray:
     """
-    Corre el modelo CCR (Charnes–Cooper–Rhodes) radial.
-    Parámetros:
-      - df: DataFrame con todas las DMUs y sus variables.
-      - dmu_column: nombre de la columna con el identificador de cada DMU.
-      - input_cols: lista de nombres de columnas que son inputs.
-      - output_cols: lista de nombres de columnas que son outputs.
-      - orientation: "input" o "output".
-      - rts: "CRS" (returns to scale constantes) o "VRS"/"BCC" (returns to scale variables).
-    Retorna:
-      Un DataFrame con columnas: [DMU, eficiencia_ccr, lambda_vector (dict), slacks_inputs (dict), slacks_outputs (dict)]
+    X: np.array shape (m, n)  (inputs)
+    Y: np.array shape (s, n)  (outputs)
+    rts: "CRS" (CCR) o "VRS" (BCC)
+    orientation: "input" o "output"
+    super_eff: si True, excluye la DMU actual para super-eficiencia
+    Devuelve vector de eficiencias (length n).
     """
-    # 1. Validar que los datos sean estrictamente positivos
-    validate_dataframe(df, input_cols, output_cols, allow_zero=False, allow_negative=False)
+    m, n = X.shape
+    eff = np.zeros(n)
 
-    # 2. Preparar matrices X (inputs) e Y (outputs)
-    X = df[input_cols].values
-    Y = df[output_cols].values
-    dmus = df[dmu_column].values
+    for i in range(n):
+        # índices de las otras DMU (para super-eficiencia)
+        if super_eff:
+            mask = np.ones(n, dtype=bool)
+            mask[i] = False
+            X_mat = X[:, mask]
+            Y_mat = Y[:, mask]
+            num_vars = n - 1
+        else:
+            X_mat = X
+            Y_mat = Y
+            num_vars = n
 
-    n_dmu = X.shape[0]
-    m = len(input_cols)
-    s = len(output_cols)
+        # variables lambda
+        lambdas = cp.Variable((num_vars, 1), nonneg=True)
 
-    # Placeholder: aquí va la lógica original de src/dea_analyzer.py 
-    # para armar y resolver el modelo lineal de CCR. Por ejemplo, con pulp:
-    #
-    # for i in range(n_dmu):
-    #     model = pulp.LpProblem(...)
-    #     # definir variables, restricciones, función objetivo
-    #     model.solve()
-    #     theta_i = ...
-    #     lambdas_i = ...
-    #     slacks_in_i = ...
-    #     slacks_out_i = ...
-    #     # almacenar resultados en listas/estructuras
-    #
-    # Al concluir, armar un DataFrame con columnas: 
-    #   'DMU', 'efficiency', 'lambda', 'slacks_inputs', 'slacks_outputs'
-    #
-    # Por simplicidad, devolvemos un DataFrame vacío aquí; reemplaza con tu propia lógica.
+        if orientation == "input":
+            theta = cp.Variable()
+            # restricciones input-oriented
+            cons = [
+                Y_mat @ lambdas >= Y[:, [i]],
+                X_mat @ lambdas <= theta * X[:, [i]],
+            ]
+            if rts == "VRS":
+                cons.append(cp.sum(lambdas) == 1)
+            obj = cp.Minimize(theta)
+        else:  # output-oriented
+            phi = cp.Variable()
+            cons = [
+                Y_mat @ lambdas >= phi * Y[:, [i]],
+                X_mat @ lambdas <= X[:, [i]],
+            ]
+            if rts == "VRS":
+                cons.append(cp.sum(lambdas) == 1)
+            obj = cp.Maximize(phi)
 
-    resultados = []
-    for i in range(n_dmu):
-        dmu_id = dmus[i]
-        # Ejemplo de resultados ficticios: reemplazar con la lógica real
-        eficiencia = np.nan  
-        lambdas = {str(d): 0.0 for d in dmus}
-        slacks_in = {inp: 0.0 for inp in input_cols}
-        slacks_out = {out: 0.0 for out in output_cols}
+        prob = cp.Problem(obj, cons)
+        prob.solve(
+            solver=cp.ECOS,
+            abstol=1e-6,
+            reltol=1e-6,
+            feastol=1e-8,
+            verbose=False
+        )
 
-        resultados.append({
-            dmu_column: dmu_id,
-            "tec_efficiency_ccr": eficiencia,
-            "lambda_vector": lambdas,
-            "slacks_inputs": slacks_in,
-            "slacks_outputs": slacks_out
-        })
+        # extraer valor
+        if orientation == "input":
+            eff[i] = float(theta.value) if theta.value is not None else np.nan
+        else:
+            eff[i] = float(phi.value) if phi.value is not None else np.nan
 
-    df_res = pd.DataFrame(resultados)
-    return df_res
-
-
-def run_bcc(
-    df: pd.DataFrame,
-    dmu_column: str,
-    input_cols: list,
-    output_cols: list,
-    orientation: str = "input",
-    rts: str = "VRS"
-) -> pd.DataFrame:
-    """
-    Corre el modelo BCC (Banker–Charnes–Cooper), es decir, el modelo radial con Returns‐to‐Scale variables.
-    Parámetros idénticos a run_ccr, salvo que rts siempre se interpretará como "VRS".
-    Retorna:
-      DataFrame con columnas: [DMU, eficiencia_bcc, lambda_vector, slacks_inputs, slacks_outputs, scale_efficiency, rts_label]
-    """
-    # 1. Validar datos estrictamente positivos
-    validate_dataframe(df, input_cols, output_cols, allow_zero=False, allow_negative=False)
-
-    # 2. Preparar X e Y
-    X = df[input_cols].values
-    Y = df[output_cols].values
-    dmus = df[dmu_column].values
-
-    n_dmu = X.shape[0]
-    m = len(input_cols)
-    s = len(output_cols)
-
-    # Placeholder: lógica de BCC (añadir restricción Σλ = 1 para VRS)
-    # por ejemplo, con pulp o con tu método habitual.
-    resultados = []
-    for i in range(n_dmu):
-        dmu_id = dmus[i]
-        eficiencia = np.nan
-        lambdas = {str(d): 0.0 for d in dmus}
-        slacks_in = {inp: 0.0 for inp in input_cols}
-        slacks_out = {out: 0.0 for out in output_cols}
-        scale_eff = np.nan           # = eficiencia_ccr / eficiencia_bcc
-        rts_label = "CRS"            # o "IRS"/"DRS", determinar según duales
-
-        resultados.append({
-            dmu_column: dmu_id,
-            "tec_efficiency_bcc": eficiencia,
-            "lambda_vector": lambdas,
-            "slacks_inputs": slacks_in,
-            "slacks_outputs": slacks_out,
-            "scale_efficiency": scale_eff,
-            "rts_label": rts_label
-        })
-
-    df_res = pd.DataFrame(resultados)
-    return df_res
+    return eff
