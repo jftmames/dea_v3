@@ -6,6 +6,10 @@ from openai import OpenAI
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # ---------- reglas formales básicas ----------
+for col in df.columns:
+    if not pd.api.types.is_numeric_dtype(df[col]):
+        issues.append(f"Columna '{col}' no es numérica.")
+
 def _formal_checks(df: pd.DataFrame):
     issues = []
     if df.isnull().values.any():
