@@ -13,6 +13,20 @@ st.set_page_config(page_title="Simulador Econométrico-Deliberativo", layout="wi
 init_db()
 st.title("Simulador Econométrico-Deliberativo")
 
+# Modo Tutorial en la barra lateral
+tutorial_mode = st.sidebar.checkbox("Modo Tutorial")
+if tutorial_mode:
+    st.sidebar.markdown("### Paso 1/5: Carga de datos")
+    st.sidebar.markdown("- Suba un CSV con columnas: DMU, inputs, outputs.")
+    st.sidebar.markdown("### Paso 2/5: Seleccionar columnas")
+    st.sidebar.markdown("- Elija la columna DMU, luego inputs y outputs.")
+    st.sidebar.markdown("### Paso 3/5: Validación")
+    st.sidebar.markdown("- La app validará que no haya nulos, ceros o negativos.")
+    st.sidebar.markdown("### Paso 4/5: Ejecución DEA")
+    st.sidebar.markdown("- Haga clic en 'Ejecutar DEA (CCR y BCC)'.")
+    st.sidebar.markdown("### Paso 5/5: Reportes y Descargas")
+    st.sidebar.markdown("- Puede descargar reporte HTML, Excel o PPTX.")
+
 # 1) Subida de datos
 archivo = st.file_uploader("Sube tu archivo CSV con datos (DMU, inputs, outputs)", type=["csv"])
 if archivo is None:
