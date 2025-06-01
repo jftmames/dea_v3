@@ -178,72 +178,68 @@ if upload:
         st.subheader(f"Resultados DEA ({model}-{orientation})")
         st.dataframe(dea_df, use_container_width=True)
 
-        # 4.2 Botón para exportar resultados DEA a CSV
-        csv_dea = dea_df.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            label="📥 Descargar resultados DEA (CSV)",
-            data=csv_dea,
-            file_name="dea_results.csv",
-            mime="text/csv",
-        )
-
-        # ── 4.3 Visualizaciones interactivas ──
+    # 4.3 Visualizaciones interactivas
         st.markdown("---")
         st.subheader("Visualizaciones interactivas")
-
+        
+        # Recuperamos inputs/outputs del estado de sesión (si existen),
+        # en caso contrario, tomamos la variable local.
+        if "inputs" in st.session_state:
+            inputs_list = st.session_state["inputs"]
+        else:
+            inputs_list = inputs  # proveniente de sidebar
+        
+        if "outputs" in st.session_state:
+            outputs_list = st.session_state["outputs"]
+        else:
+            outputs_list = outputs  # proveniente de sidebar
+        
         # A) Histograma de eficiencias
         with st.expander("📊 Histograma de Eficiencias"):
             try:
                 hist_fig = plot_efficiency_histogram(dea_df, bins=20)
                 st.plotly_chart(hist_fig, use_container_width=True)
             except Exception as e:
-                st.error(f"Imposible generar histograma de eficiencias: {e}")
-
+                st.error(f"Error al generar Histograma de eficiencias: {e}")
+        
         # B) Scatter 3D inputs vs outputs
-        if len(inputs) >= 2 and len(outputs) >= 1:
-            with st.expander("🔍 Scatter 3D Inputs vs Output (coloreado por eficiencia)"):
+        with st.expander("🔍 Scatter 3D Inputs vs Output (coloreado por eficiencia)"):
+            if len(inputs_list) >= 2 and len(outputs_list) >= 1:
                 try:
-                    scatter3d_fig = plot_3d_inputs_outputs(df, inputs, outputs, dea_df)
-                    st.plotly_chart(scatter3d_fig, use_container_width=True)
-                except ValueError as ve:
-                    st.warning(f"Scatter 3D no disponible: {ve}")
+                    # Nos aseguramos de que dea_df tenga la columna "DMU"
+                    if "DMU" not in dea_df.columns:
+                        st.error("No existe la columna 'DMU' en los resultados DEA. "
+                                 "No se puede generar el Scatter 3D.")
+                    else:
+                        scatter3d_fig = plot_3d_inputs_outputs(df, inputs_list, outputs_list, dea_df)
+                        st.plotly_chart(scatter3d_fig, use_container_width=True)
                 except Exception as e:
                     st.error(f"Error al generar Scatter 3D: {e}")
-        else:
-            st.info("Para el Scatter 3D se requieren al menos 2 Inputs y 1 Output.")
-
+            else:
+                st.info("Se requieren al menos 2 Inputs y 1 Output para el Scatter 3D.")
+        
         # C) Benchmark Spider para DMU seleccionada
         with st.expander("🕸️ Benchmark Spider para DMU seleccionada"):
-            efficient_dmus = dea_df.query("efficiency == 1")["DMU"].tolist()
-            if len(efficient_dmus) == 0:
-                st.info("No hay DMU eficientes (efficiency == 1) para hacer benchmark.")
+            if "DMU" not in dea_df.columns:
+                st.info("No existe la columna 'DMU' en los resultados DEA, no se puede hacer Benchmark Spider.")
+            elif dea_df.query("efficiency == 1").empty:
+                st.info("No hay DMU eficientes (efficiency == 1) para benchmark.")
             else:
                 selected_dmu = st.selectbox("Elige DMU para spider", dea_df["DMU"])
                 try:
-                    # Asegurar columna 'DMU' en df original
-                    df_orig = df.copy()
-                    if "DMU" not in df_orig.columns:
-                        df_orig["DMU"] = df_orig.index.astype(str)
-
-                    # Convertir DMU a str en ambos DataFrames
-                    df_orig["DMU"] = df_orig["DMU"].astype(str)
-                    dea_df["DMU"] = dea_df["DMU"].astype(str)
-
-                    merged_for_spider = dea_df[["DMU", "efficiency"]].merge(
-                        df_orig[["DMU"] + inputs + outputs],
+                    # Construimos un DataFrame que tenga columnas: DMU, inputs..., outputs..., efficiency
+                    merged_for_spider = dea_df.merge(
+                        df[inputs_list + outputs_list + ["DMU"]],
                         on="DMU",
                         how="left"
                     )
-
                     spider_fig = plot_benchmark_spider(
                         merged_for_spider,
                         selected_dmu,
-                        inputs,
-                        outputs
+                        inputs_list,
+                        outputs_list
                     )
                     st.plotly_chart(spider_fig, use_container_width=True)
-                except ValueError as ve:
-                    st.warning(f"Benchmark Spider no disponible: {ve}")
                 except Exception as e:
                     st.error(f"Imposible generar Benchmark Spider: {e}")
 
