@@ -42,24 +42,19 @@ if upload:
     # 3. Ejecutar DEA
     # ------------------------------------------------------------------
         
-if st.button("Ejecutar DEA (CCR input)"):
-    try:
-        with st.spinner("Optimizando..."):
-            # progress bar
-            progress = st.progress(0.0)
-            res = run_dea_with_progress(df, inputs, outputs, progress)
-    try:
-        res = run_dea(df, inputs, outputs, model="CCR")
-    except ValueError as e:           # conversión o NaN
-        st.error(f"❌ {e}")
-        st.stop()
-    except KeyError as e:             # nombre de columna inexistente
-        st.error(f"🔑 Columna no encontrada: {e}")
-        st.stop()
-    else:
-        st.session_state["res_df"] = res
-        st.subheader("Eficiencias")
-        st.dataframe(res, use_container_width=True)
+    if st.button("Ejecutar DEA (CCR input)"):
+        try:
+            res = run_dea(df, inputs, outputs, model="CCR")
+        except ValueError as e:         # conversión a float o NaN en columnas
+            st.error(f"❌ {e}")
+            st.stop()
+        except KeyError as e:           # nombre de columna no existe
+            st.error(f"🔑 Columna no encontrada: {e}")
+            st.stop()
+        else:
+            st.session_state["res_df"] = res
+            st.subheader("Eficiencias")
+            st.dataframe(res, use_container_width=True)
 
 # ------------------------------------------------------------------
 # 4. Complejos de Indagación
