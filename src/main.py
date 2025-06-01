@@ -27,6 +27,15 @@ if tutorial_mode:
     st.sidebar.markdown("### Paso 5/5: Reportes y Descargas")
     st.sidebar.markdown("- Puede descargar reporte HTML, Excel o PPTX.")
 
+# Botón para reindexar RAG
+if st.sidebar.button("Reindexar RAG"):
+    try:
+        from rag_indexer import reindex_rag
+        reindex_rag("path/to/corpus")
+        st.sidebar.success("Reindexación completada.")
+    except Exception as e:
+        st.sidebar.error(f"Error al reindexar: {e}")
+
 # 1) Subida de datos
 archivo = st.file_uploader("Sube tu archivo CSV con datos (DMU, inputs, outputs)", type=["csv"])
 if archivo is None:
@@ -78,7 +87,7 @@ if st.button("Ejecutar DEA (CCR y BCC)"):
     with st.spinner("Calculando eficiencias…"):
         resultados = mostrar_resultados(df, dmu_col, input_cols, output_cols)
 
-    # Mostrar tablas de eficacia
+    # Mostrar tablas de eficiencia
     st.subheader("Tabla de Eficiencias CCR")
     st.dataframe(resultados["df_ccr"])
 
