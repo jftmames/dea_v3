@@ -1,4 +1,3 @@
-# ---------- src/results.py ----------
 import plotly.graph_objects as go
 import plotly.express as px
 import pandas as pd
@@ -40,11 +39,10 @@ def plot_3d_inputs_outputs(
     - dea_df: DataFrame de resultados DEA (contiene "DMU" y "efficiency").
     - size_factor: factor de escala para el tamaño de marca en el 3D.
     """
-    # Comprobar que hay suficientes columnas
     if len(inputs) < 2 or len(outputs) < 1:
         raise ValueError("Se requieren ≥2 inputs y ≥1 output para el scatter 3D.")
 
-    # Fusionar para obtener eficiencia por DMU
+    # Fusionar df y dea_df para que cada DMU tenga su eficiencia
     if "DMU" in df.columns:
         merged = df.merge(dea_df[["DMU", "efficiency"]], on="DMU", how="left")
     else:
@@ -77,44 +75,36 @@ def plot_3d_inputs_outputs(
 
 
 def plot_benchmark_spider(
-    dea_df: pd.DataFrame,
+    merged_df: pd.DataFrame,
     target_dmu: str,
     inputs: list[str],
     outputs: list[str]
 ) -> go.Figure:
     """
     Genera un gráfico tipo radar (spider) comparando la DMU seleccionada
-    frente a las DMU eficientes (eficiencia == 1) en cada input y cada output.
-    - dea_df: DataFrame con "DMU", "efficiency".
+    frente al promedio de las DMU eficientes (efficiency == 1) para cada input/output.
+    - merged_df: DataFrame que contiene columnas inputs+outputs+DMU+efficiency.
     - target_dmu: ID de la DMU que se quiere comparar.
     - inputs: lista de columnas de insumos.
     - outputs: lista de columnas de productos.
     """
     # Filtrar DMU eficientes
-    efficient_dmus = dea_df.query("efficiency == 1")["DMU"].tolist()
-    if not efficient_dmus:
+    eff_df = merged_df.query("efficiency == 1")
+    if eff_df.empty:
         raise ValueError("No hay DMU eficientes (efficiency == 1) para benchmark.")
 
-    # Suponer que existe un DataFrame global en contexto con las variables originales.
-    # El usuario deberá pasar un DataFrame que contenga dichas columnas.
-    # Para aislar este módulo, pediremos que 'dea_df' contenga todas las columnas de datos.
-    # Pero normalmente fusionaríamos contra el DataFrame original.
-
-    # Construir promedios de inputs/outputs para DMU eficientes
-    # Asumimos que dea_df ya contiene las columnas de inputs/outputs
-    # (o bien, el usuario fusionó previamente el DataFrame original).
+    # Promedio de cada columna (inputs + outputs) para DMU eficientes
     cols = inputs + outputs
-    eff_df = dea_df.query("efficiency == 1")[["DMU"] + cols].set_index("DMU")
-    avg_values = eff_df.mean(axis=0)
+    avg_values = eff_df[cols].mean(axis=0)
 
     # Valores de la DMU objetivo
-    if target_dmu not in dea_df["DMU"].values:
-        raise KeyError(f"La DMU '{target_dmu}' no existe en el DataFrame de DEA.")
-    target_row = dea_df.loc[dea_df["DMU"] == target_dmu, cols].iloc[0]
+    if target_dmu not in merged_df["DMU"].values:
+        raise KeyError(f"La DMU '{target_dmu}' no existe en el DataFrame.")
+    target_row = merged_df.loc[merged_df["DMU"] == target_dmu, cols].iloc[0]
 
-    # Preparar datos para el radar
+    # Preparar categorías y cerrar el polígono
     categories = cols.copy()
-    categories.append(cols[0])  # cerrar el polígono
+    categories.append(cols[0])
 
     target_vals = [float(target_row[c]) for c in cols]
     target_vals.append(target_vals[0])
@@ -137,15 +127,15 @@ def plot_benchmark_spider(
         name=f"DMU: {target_dmu}"
     ))
 
+    max_range = max(max(target_vals), max(avg_vals)) * 1.1
     fig.update_layout(
         polar=dict(
             radialaxis=dict(
                 visible=True,
-                # Ajustar rango dinámico
-                range=[0, max(max(target_vals), max(avg_vals)) * 1.1]
+                range=[0, max_range]
             )
         ),
         showlegend=True,
-        title=f"Benchmark Spider: '{target_dmu}' vs. Promedio de Eficientes"
+        title=f"Benchmark Spider: '{target_dmu}' vs Promedio de Eficientes"
     )
     return fig
