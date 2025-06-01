@@ -20,7 +20,7 @@ def _get_row_by_dmu(df: pd.DataFrame, dmu: str) -> pd.DataFrame:
     return pd.DataFrame()  # no encontrada
 
 
-# ---------- UI ----------
+# ---------- UI principal ----------
 st.set_page_config(page_title="DEA Deliberativo MVP", layout="wide")
 st.title("DEA Deliberativo – MVP")
 
@@ -41,7 +41,7 @@ if upload:
         st.stop()
 
     # ------------------------------------------------------------------
-    # Sidebar: controles de inputs/outputs y parámetros DEA
+    # Sidebar: controles de Inputs/Outputs y parámetros DEA
     # ------------------------------------------------------------------
     with st.sidebar:
         st.markdown("## Parámetros de entrada")
@@ -50,16 +50,18 @@ if upload:
             "Inputs",
             numeric_cols,
             default=numeric_cols[:-1],
-            help="Columnas numéricas que actúan como insumos."
+            help="Columnas numéricas que se usarán como insumos (deben existir)."
         )
         outputs = st.multiselect(
             "Outputs",
             numeric_cols,
             default=[numeric_cols[-1]],
-            help="Columnas numéricas que actúan como productos."
+            help="Columnas numéricas que se usarán como productos (deben existir)."
         )
 
+        st.markdown("---")
         st.markdown("## Configuración DEA")
+
         model = st.selectbox(
             "Modelo",
             ["CCR", "BCC"],
@@ -75,7 +77,7 @@ if upload:
         super_eff = st.checkbox(
             "Super-eficiencia",
             value=False,
-            help="Excluye la DMU actual del conjunto de comparación."
+            help="Si se activa, la DMU actual se excluye al calcular su eficiencia."
         )
 
         st.markdown("---")
@@ -88,12 +90,16 @@ if upload:
         run_button = st.button(f"Ejecutar DEA ({model}-{orientation})")
 
     # ------------------------------------------------------------------
-    # 2. Validación de datos (área principal)
+    # 2. Validar datos (área principal)
     # ------------------------------------------------------------------
     if st.button("Validar datos"):
         result = validate(df, inputs, outputs)
-        st.subheader("Resultado del validador")
-        st.json(result)
+        if result.get("issues"):
+            st.error("❌ Problemas encontrados:")
+            st.json(result)
+        else:
+            st.success("✅ Datos válidos")
+            st.json(result)
 
     # ------------------------------------------------------------------
     # 3. Ejecutar DEA
@@ -107,7 +113,7 @@ if upload:
             st.error("No se puede ejecutar super-eficiencia con menos de 2 DMU.")
             st.stop()
 
-        with st.spinner(f"Optimizando DEA ({model}-{orientation})…"):
+        with st.spinner(f"Calculando eficiencias DEA para {num_dmu} DMU…"):
             try:
                 res = run_dea(
                     df,
@@ -124,14 +130,13 @@ if upload:
                 st.error(f"❌ {e}")
                 st.stop()
 
-        # Guardamos en session_state el DataFrame y parámetros
+        # Guardamos en sesión el DataFrame y parámetros
         st.session_state["res_df"] = res
         st.session_state["dea_model"] = model
         st.session_state["dea_orientation"] = orientation
         st.session_state["dea_super_eff"] = super_eff
-        # Reiniciamos árbol previo (si existía)
-        if "last_tree" in st.session_state:
-            del st.session_state["last_tree"]
+
+        st.success("✅ DEA calculado correctamente")
 
     # ------------------------------------------------------------------
     # 4. Mostrar Resultados DEA y habilitar exportaciones, árbol y EEE
@@ -142,7 +147,7 @@ if upload:
         orientation = st.session_state["dea_orientation"]
         super_eff = st.session_state["dea_super_eff"]
 
-        # 4.1 Mostrar tabla de eficiencias
+        # 4.1 Tabla de eficiencias
         st.subheader(f"Resultados DEA ({model}-{orientation})")
         st.dataframe(dea_df, use_container_width=True)
 
@@ -168,14 +173,14 @@ if upload:
                 min_value=2,
                 max_value=4,
                 value=3,
-                help="Cantidad de niveles jerárquicos en el árbol."
+                help="Define cuántos niveles jerárquicos tendrá el árbol (2–4)."
             )
             breadth = st.slider(
                 "Subpreguntas / nodo",
-                min_value=3,
-                max_value=8,
-                value=5,
-                help="Máximo número de hijos por nodo."
+                min_value=2,
+                max_value=6,
+                value=3,
+                help="Define cuántos hijos máximo puede tener cada nodo (2–6)."
             )
 
             if st.button("Crear árbol"):
@@ -199,7 +204,7 @@ if upload:
                     "super_eff": super_eff,
                 }
 
-                with st.spinner("Generando árbol…"):
+                with st.spinner(f"Construyendo árbol (niveles={depth}, hijos={breadth})…"):
                     tree = generate_inquiry(
                         f"¿Por qué la {dmu} es ineficiente?",
                         context=context,
@@ -210,8 +215,9 @@ if upload:
 
                 # Guardamos el árbol en sesión
                 st.session_state["last_tree"] = tree
+                st.success("✅ Árbol generado correctamente")
 
-        # Si ya existe un árbol guardado (incluso sin pulsar Crear árbol en esta carga)
+        # Si ya existe un árbol guardado (incluso tras recarga)
         if "last_tree" in st.session_state:
             tree = st.session_state["last_tree"]
 
@@ -219,33 +225,31 @@ if upload:
             st.subheader("Árbol de Indagación (último generado)")
             st.plotly_chart(to_plotly_tree(tree), use_container_width=True)
 
-            # 4.5 JSON editable (opcional)
+            # 4.5 JSON editable
             st.markdown("**Editar árbol JSON (opcional)**")
             json_text = json.dumps(tree, ensure_ascii=False, indent=2)
             edited = st.text_area("Árbol JSON", value=json_text, height=200)
             if st.button("Actualizar árbol"):
                 try:
                     new_tree = json.loads(edited)
-                    # Validación mínima: debe ser dict con al menos 1 clave
                     if isinstance(new_tree, dict) and new_tree:
                         st.session_state["last_tree"] = new_tree
-                        st.success("Árbol actualizado correctamente.")
+                        st.success("✅ Árbol actualizado correctamente.")
                     else:
-                        st.error("El JSON debe ser un objeto con al menos un nodo.")
+                        st.error("❌ El JSON debe ser un objeto con al menos un nodo.")
                 except Exception as e:
-                    st.error(f"JSON inválido: {e}")
+                    st.error(f"❌ JSON inválido: {e}")
 
             with st.expander("Ver JSON completo"):
                 st.json(st.session_state["last_tree"])
 
-            # 4.6 Cálculo y visualización del EEE sobre el árbol guardado
+            # 4.6 Cálculo y visualización del EEE
             from epistemic_metrics import compute_eee
 
             eee_score = compute_eee(tree, depth_limit=depth, breadth_limit=breadth)
             st.metric(label="Índice de Equilibrio Erotético (EEE)", value=eee_score)
 
             # 4.7 Exportaciones (CSV/JSON y reporte HTML)
-            # A) Aplanar el árbol para CSV
             def _flatten_tree(tree: dict, parent: str = "") -> list[tuple[str, str]]:
                 rows = []
                 for q, kids in tree.items():
@@ -256,6 +260,8 @@ if upload:
 
             flat = _flatten_tree(tree)
             df_tree = pd.DataFrame(flat, columns=["question", "parent"])
+
+            # A) Descargar árbol en CSV
             csv_tree = df_tree.to_csv(index=False).encode("utf-8")
             st.download_button(
                 label="📥 Descargar árbol (CSV)",
