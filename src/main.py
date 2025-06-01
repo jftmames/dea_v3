@@ -1,10 +1,25 @@
 import streamlit as st
-import pandas as pd 
+import pandas as pd
 
 from data_validator import validate
 from dea_analyzer import run_dea
 from inquiry_engine import generate_inquiry, to_plotly_tree
 
+
+# ---------- util: obtener la fila de la DMU ----------
+def _get_row_by_dmu(df: pd.DataFrame, dmu: str) -> pd.DataFrame:
+    """Devuelve la fila correspondiente a la DMU sin lanzar KeyError."""
+    if "DMU" in df.columns:
+        return df.loc[df["DMU"] == dmu]
+    if dmu in df.index:
+        return df.loc[[dmu]]
+    mask = df.index.astype(str) == str(dmu)
+    if mask.any():
+        return df.loc[mask]
+    return pd.DataFrame()  # no encontrada
+
+
+# ---------- UI ----------
 st.set_page_config(page_title="DEA Deliberativo MVP", layout="wide")
 st.title("DEA Deliberativo – MVP")
 
@@ -18,7 +33,7 @@ if upload:
     st.subheader("Vista previa")
     st.dataframe(df.head(), use_container_width=True)
 
-    # solo columnas numéricas para selección
+    # solo columnas numéricas para Inputs / Outputs
     numeric_cols = df.select_dtypes(include="number").columns.tolist()
     if not numeric_cols:
         st.error("⚠️ El archivo no contiene columnas numéricas.")
@@ -41,29 +56,20 @@ if upload:
     # ------------------------------------------------------------------
     # 3. Ejecutar DEA
     # ------------------------------------------------------------------
-        
-if st.button("Ejecutar DEA (CCR input)"):
-    with st.spinner("Optimizando…"):
-        try:
-            res = run_dea(df, inputs, outputs, model="CCR")
-            if res["efficiency"].isna().all():
-                st.error("⚠️ El solver no devolvió soluciones válidas.")
+    if st.button("Ejecutar DEA (CCR input)"):
+        with st.spinner("Optimizando…"):
+            try:
+                res = run_dea(df, inputs, outputs, model="CCR")
+                if res["efficiency"].isna().all():
+                    st.error("⚠️ El solver no devolvió soluciones válidas.")
+                    st.stop()
+            except (ValueError, KeyError) as e:
+                st.error(f"❌ {e}")
                 st.stop()
-        except (ValueError, KeyError) as e:
-            st.error(f"❌ {e}")
-            st.stop()
 
-    st.session_state["res_df"] = res
-    st.subheader("Eficiencias CCR")
-    st.dataframe(res, use_container_width=True)
-
-
-# ------------------------------------------------------------------
-# 4. Complejos de Indagación
-# ------------------------------------------------------------------
-from inquiry_engine import generate_inquiry, to_plotly_tree
-
-# … después de calcular res_df …
+        st.session_state["res_df"] = res
+        st.subheader("Eficiencias CCR")
+        st.dataframe(res, use_container_width=True)
 
 # ------------------------------------------------------------------
 # 4. Complejos de Indagación
@@ -81,20 +87,20 @@ if "res_df" in st.session_state:
 
         if st.button("Crear árbol"):
 
-            # -------- localizar la fila de la DMU --------
-            if "DMU" in df.columns:
-                row = df.loc[df["DMU"] == dmu]
-            else:
-                row = df.loc[[dmu]]
+            # localizar la fila de la DMU
+            row = _get_row_by_dmu(df, dmu)
+            if row.empty:
+                st.error(f"No se encontró la DMU '{dmu}' en el DataFrame original.")
+                st.stop()
 
-            # -------- contexto rico para el modelo --------
+            # contexto rico para el modelo
             context = {
                 "dmu": dmu,
                 "inputs": {c: float(row[c].values[0]) for c in inputs},
                 "outputs": {c: float(row[c].values[0]) for c in outputs},
                 "efficiency": float(
                     st.session_state["res_df"]
-                    .set_index("DMU", drop=False)              # asegura columna
+                    .set_index("DMU", drop=False)
                     .loc[dmu, "efficiency"]
                 ),
                 "peers": (
