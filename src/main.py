@@ -40,8 +40,14 @@ st.markdown(
 upload = st.file_uploader("Sube tu CSV", type="csv")
 if upload:
     df = pd.read_csv(upload)
+
+    # 1.a) Si no existe columna 'DMU', la creamos desde el índice
+    if "DMU" not in df.columns:
+        df.insert(0, "DMU", df.index.astype(str))
+
     # Guardamos el DataFrame original en sesión, para “Reajustar” más adelante
     st.session_state["orig_df"] = df.copy()
+
     st.subheader("Vista previa del CSV")
     st.dataframe(df.head(), use_container_width=True)
 
@@ -211,7 +217,7 @@ if upload:
         # A) Histograma de eficiencias
         with st.expander("📊 Histograma de Eficiencias"):
             hist_fig = plot_efficiency_histogram(dea_df, bins=20)
-            st.plotly_chart(hist_fig, use_container_width=True)
+            st.plotly_chart(hist_fig, use_container_width=True, key="histogram")
 
         # B) Scatter 3D inputs vs outputs (coloreado por eficiencia)
         if len(st.session_state["inputs"]) >= 2 and len(st.session_state["outputs"]) >= 1:
@@ -220,7 +226,8 @@ if upload:
                     scatter3d_fig = plot_3d_inputs_outputs(
                         df, st.session_state["inputs"], st.session_state["outputs"], dea_df
                     )
-                    st.plotly_chart(scatter3d_fig, use_container_width=True)
+                    # le damos un key distinto para evitar duplicidad
+                    st.plotly_chart(scatter3d_fig, use_container_width=True, key="scatter3d")
                 except Exception as e:
                     st.error(f"Error al generar Scatter 3D: {e}")
         else:
@@ -231,10 +238,11 @@ if upload:
             if dea_df.query("efficiency == 1").empty:
                 st.info("No hay DMU eficientes (efficiency == 1) para benchmark.")
             else:
-                selected_dmu = st.selectbox("Elige DMU para spider", dea_df["DMU"])
+                selected_dmu = st.selectbox("Elige DMU para spider", dea_df["DMU"], key="spider_dmu_select")
                 try:
+                    # Aseguramos que merged_for_spider tenga columna 'DMU'
                     merged_for_spider = dea_df.merge(
-                        df[st.session_state["inputs"] + st.session_state["outputs"] + (["DMU"] if "DMU" in df.columns else [])],
+                        df[st.session_state["inputs"] + st.session_state["outputs"] + ["DMU"]],
                         on="DMU",
                         how="left"
                     )
@@ -244,7 +252,7 @@ if upload:
                         st.session_state["inputs"],
                         st.session_state["outputs"]
                     )
-                    st.plotly_chart(spider_fig, use_container_width=True)
+                    st.plotly_chart(spider_fig, use_container_width=True, key="spider_chart")
                 except Exception as e:
                     st.error(f"Imposible generar Benchmark Spider: {e}")
 
@@ -255,24 +263,26 @@ if upload:
         else:
             st.markdown("---")
             st.subheader("Generar Complejo de Indagación para una DMU ineficiente")
-            dmu = st.selectbox("DMU ineficiente", ineff_df["DMU"])
+            dmu = st.selectbox("DMU ineficiente", ineff_df["DMU"], key="dmu_ineff")
 
             depth = st.slider(
                 "Niveles del árbol",
                 min_value=2,
                 max_value=4,
                 value=3,
-                help="Cuántos niveles jerárquicos tendrá el árbol (2–4)."
+                help="Cuántos niveles jerárquicos tendrá el árbol (2–4).",
+                key="slider_depth"
             )
             breadth = st.slider(
                 "Subpreguntas / nodo",
                 min_value=2,
                 max_value=6,
                 value=3,
-                help="Cuántos hijos máximo puede tener cada nodo (2–6)."
+                help="Cuántos hijos máximo puede tener cada nodo (2–6).",
+                key="slider_breadth"
             )
 
-            if st.button("Crear árbol"):
+            if st.button("Crear árbol", key="btn_create_tree"):
                 row = _get_row_by_dmu(df, dmu)
                 if row.empty:
                     st.error(f"No se encontró la DMU '{dmu}' en el DataFrame original.")
@@ -317,13 +327,13 @@ if upload:
 
             st.markdown("---")
             st.subheader("Árbol de Indagación (último generado)")
-            st.plotly_chart(to_plotly_tree(tree), use_container_width=True)
+            st.plotly_chart(to_plotly_tree(tree), use_container_width=True, key="tree_chart")
 
             # JSON editable del árbol
             st.markdown("**Editar árbol JSON (opcional)**")
             json_text = json.dumps(tree, ensure_ascii=False, indent=2)
-            edited = st.text_area("Árbol JSON", value=json_text, height=200)
-            if st.button("Actualizar árbol"):
+            edited = st.text_area("Árbol JSON", value=json_text, height=200, key="json_edit")
+            if st.button("Actualizar árbol", key="btn_update_tree"):
                 try:
                     new_tree = json.loads(edited)
                     if isinstance(new_tree, dict) and new_tree:
@@ -335,13 +345,13 @@ if upload:
                     st.error(f"❌ JSON inválido: {e}")
 
             with st.expander("Ver JSON completo"):
-                st.json(st.session_state["last_tree"])
+                st.json(st.session_state["last_tree"], expanded=False)
 
             # Cálculo y visualización del EEE
             from epistemic_metrics import compute_eee
 
             eee_score = compute_eee(tree, depth_limit=depth, breadth_limit=breadth)
-            st.metric(label="Índice de Equilibrio Erotético (EEE)", value=eee_score)
+            st.metric(label="Índice de Equilibrio Erotético (EEE)", value=eee_score, key="eee_metric")
 
             # Exportaciones del árbol y del EEE
             def _flatten_tree(tree: dict, parent: str = "") -> list[tuple[str, str]]:
@@ -362,6 +372,7 @@ if upload:
                 data=csv_tree,
                 file_name="inquiry_tree.csv",
                 mime="text/csv",
+                key="download_tree_csv"
             )
 
             # Descargar árbol en JSON
@@ -371,6 +382,7 @@ if upload:
                 data=json_tree_bytes,
                 file_name="inquiry_tree.json",
                 mime="application/json",
+                key="download_tree_json"
             )
 
             # Descargar EEE como CSV de metadatos
@@ -390,6 +402,7 @@ if upload:
                 data=csv_eee,
                 file_name="eee_meta.csv",
                 mime="text/csv",
+                key="download_eee_csv"
             )
 
             # Descargar reporte completo HTML
@@ -404,6 +417,7 @@ if upload:
                 data=html_bytes,
                 file_name="reporte_dea_deliberativo.html",
                 mime="text/html",
+                key="download_full_report"
             )
 
         # ------------------------------------------------------------------
@@ -420,7 +434,7 @@ if upload:
             st.write("• Modelo:", model, "|", "Orientación:", orientation, "|", "Super-eff:", super_eff)
 
             # 6.2 Opción de explicar orientación con IA
-            if st.button("¿Debo cambiar orientación (input/output)?"):
+            if st.button("¿Debo cambiar orientación (input/output)?", key="btn_explain_orientation"):
                 ex = explain_orientation(
                     inputs=st.session_state["inputs"],
                     outputs=st.session_state["outputs"],
@@ -448,20 +462,23 @@ if upload:
             new_model = st.selectbox(
                 "Modelo (CCR/BCC) reajustado",
                 ["CCR", "BCC"],
-                index=0 if st.session_state["dea_model"] == "CCR" else 1
+                index=0 if st.session_state["dea_model"] == "CCR" else 1,
+                key="reajust_model"
             )
             new_orientation = st.selectbox(
                 "Orientación (input/output) reajustada",
                 ["input", "output"],
-                index=0 if st.session_state["dea_orientation"] == "input" else 1
+                index=0 if st.session_state["dea_orientation"] == "input" else 1,
+                key="reajust_orientation"
             )
             new_super_eff = st.checkbox(
                 "Super-eficiencia (reajustada)",
                 value=st.session_state["dea_super_eff"],
-                help="Marque para excluir la DMU al calcular su eficiencia (super-eff)."
+                help="Marque para excluir la DMU al calcular su eficiencia (super-eff).",
+                key="reajust_super_eff"
             )
 
-            if st.button("Reejecutar DEA con ajustes"):
+            if st.button("Reejecutar DEA con ajustes", key="btn_reajust_dea"):
                 orig_df = st.session_state["orig_df"]
                 num_dmu = orig_df.shape[0]
 
@@ -499,7 +516,7 @@ if upload:
 
                 # Histograma de las nuevas eficiencias
                 new_hist = plot_efficiency_histogram(new_res, bins=20)
-                st.plotly_chart(new_hist, use_container_width=True)
+                st.plotly_chart(new_hist, use_container_width=True, key="new_histogram")
 
                 # Guardamos en sesión los nuevos resultados y parámetros
                 st.session_state["res_df"] = new_res.copy()
