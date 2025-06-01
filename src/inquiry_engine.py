@@ -57,5 +57,8 @@ def generate_inquiry(root_question: str, depth: int = 2, breadth: int = 4) -> di
     )
 
     args = resp.choices[0].message.tool_calls[0].function.arguments
-    tree_wrapper = json.loads(args)  # {'tree': {...}}
-    return tree_wrapper["tree"]
+    tree_wrapper = json.loads(args)  # puede ser {'tree': {...}} o {...}
+
+    # si la clave existe, úsala; de lo contrario, devuelve el dict tal cual
+    return tree_wrapper.get("tree", tree_wrapper)
+
