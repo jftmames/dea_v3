@@ -5,23 +5,21 @@ import pandas as pd
 
 # ------------------------------------------------------------------
 def _safe_numeric(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
-    """
-    Intenta convertir cada columna a float.
-    Devuelve df_numérico o lanza ValueError con lista de columnas problemáticas.
-    """
+    """Convierte a float y, si alguna celda es NaN, lanza ValueError (no suprime columnas)."""
     bad_cols = []
-    converted = {}
+    df_copy = df.copy()
+
     for c in cols:
-        converted[c] = pd.to_numeric(df[c], errors="coerce")
-        if converted[c].isna().any():
+        df_copy[c] = pd.to_numeric(df_copy[c], errors="coerce")
+        if df_copy[c].isna().any():
             bad_cols.append(c)
 
     if bad_cols:
         raise ValueError(
-            f"Estas columnas tienen valores no numéricos o vacíos: {bad_cols}. "
-            "Límpialas o elimínalas de la selección."
+            f"Estas columnas contienen valores no numéricos o vacíos: {bad_cols}"
         )
-    return pd.DataFrame(converted)
+    return df_copy[cols]  # garantizado: todas las columnas presentes y numéricas
+
 
 
 # ------------------------------------------------------------------
