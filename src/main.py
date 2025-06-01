@@ -196,43 +196,70 @@ if upload:
         )
 
         # 4.3 Visualizaciones interactivas
-        st.markdown("---")
-        st.subheader("Visualizaciones interactivas")
+        # ── Bloque: 4.3 Visualizaciones interactivas ──
 
-        # A) Histograma de eficiencias
-        with st.expander("📊 Histograma de Eficiencias"):
-            hist_fig = plot_efficiency_histogram(dea_df, bins=20)
-            st.plotly_chart(hist_fig, use_container_width=True)
+st.markdown("---")
+st.subheader("Visualizaciones interactivas")
 
-        # B) Scatter 3D inputs vs outputs
-        if len(inputs) >= 2 and len(outputs) >= 1:
-            with st.expander("🔍 Scatter 3D Inputs vs Output (coloreado por eficiencia)"):
-                scatter3d_fig = plot_3d_inputs_outputs(df, inputs, outputs, dea_df)
-                st.plotly_chart(scatter3d_fig, use_container_width=True)
-        else:
-            st.info("Se requieren ≥2 Inputs y ≥1 Output para el Scatter 3D.")
+# A) Histograma de eficiencias
+with st.expander("📊 Histograma de Eficiencias"):
+    try:
+        hist_fig = plot_efficiency_histogram(dea_df, bins=20)
+        st.plotly_chart(hist_fig, use_container_width=True)
+    except Exception as e:
+        st.error(f"Imposible generar histograma de eficiencias: {e}")
 
-        # C) Benchmark Spider
-        with st.expander("🕸️ Benchmark Spider para DMU seleccionada"):
-            if dea_df.query("efficiency == 1").empty:
-                st.info("No hay DMU eficientes (efficiency == 1) para benchmark.")
-            else:
-                selected_dmu = st.selectbox("Elige DMU para spider", dea_df["DMU"])
-                try:
-                    merged_for_spider = dea_df.merge(
-                        df[inputs + outputs + (["DMU"] if "DMU" in df.columns else [])],
-                        on="DMU",
-                        how="left"
-                    )
-                    spider_fig = plot_benchmark_spider(
-                        merged_for_spider,
-                        selected_dmu,
-                        inputs,
-                        outputs
-                    )
-                    st.plotly_chart(spider_fig, use_container_width=True)
-                except Exception as e:
-                    st.error(f"Imposible generar Spider: {e}")
+# B) Scatter 3D inputs vs outputs
+# Solo si hay al menos 2 columnas en inputs y 1 en outputs
+if len(inputs) >= 2 and len(outputs) >= 1:
+    with st.expander("🔍 Scatter 3D Inputs vs Output (coloreado por eficiencia)"):
+        try:
+            scatter3d_fig = plot_3d_inputs_outputs(df, inputs, outputs, dea_df)
+            st.plotly_chart(scatter3d_fig, use_container_width=True)
+        except ValueError as ve:
+            st.warning(f"Scatter 3D no disponible: {ve}")
+        except Exception as e:
+            st.error(f"Error al generar Scatter 3D: {e}")
+else:
+    st.info("Para el Scatter 3D se requieren al menos 2 Inputs y 1 Output.")
+
+# C) Benchmark Spider para DMU seleccionada
+with st.expander("🕸️ Benchmark Spider para DMU seleccionada"):
+    # Primero revisamos si existe alguna DMU con eficiencia == 1
+    efficient_dmus = dea_df.query("efficiency == 1")["DMU"].tolist()
+    if len(efficient_dmus) == 0:
+        st.info("No hay DMU eficientes (efficiency == 1) para hacer benchmark.")
+    else:
+        selected_dmu = st.selectbox("Elige DMU para spider", dea_df["DMU"])
+        # Hacemos merge de dea_df con el df original para obtener inputs/outputs
+        try:
+            # Construir DataFrame que contenga: DMU, efficiency y todas las columnas de inputs+outputs
+            df_orig = df.copy()
+            # Asegurar que exista columna 'DMU' en df_orig
+            if "DMU" not in df_orig.columns:
+                df_orig["DMU"] = df_orig.index.astype(str)
+            # Convertir DMU a str en ambos
+            df_orig["DMU"] = df_orig["DMU"].astype(str)
+            dea_df["DMU"] = dea_df["DMU"].astype(str)
+
+            merged_for_spider = dea_df[["DMU", "efficiency"]].merge(
+                df_orig[["DMU"] + inputs + outputs],
+                on="DMU",
+                how="left"
+            )
+
+            spider_fig = plot_benchmark_spider(
+                merged_for_spider,
+                selected_dmu,
+                inputs,
+                outputs
+            )
+            st.plotly_chart(spider_fig, use_container_width=True)
+        except ValueError as ve:
+            st.warning(f"Benchmark Spider no disponible: {ve}")
+        except Exception as e:
+            st.error(f"Imposible generar Benchmark Spider: {e}")
+
 
         # 4.4 Filtrar DMU ineficientes
         ineff_df = dea_df.query("efficiency < 1")
