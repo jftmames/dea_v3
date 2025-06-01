@@ -5,10 +5,12 @@ import pandas as pd
 
 from data_validator import validate
 from results import mostrar_resultados
-from report_generator import generate_html_report
+from report_generator import generate_html_report, generate_excel_report, generate_pptx_report
+from session_manager import init_db, save_session, load_sessions
 
 st.set_page_config(page_title="Simulador Econométrico-Deliberativo", layout="wide")
 
+init_db()
 st.title("Simulador Econométrico-Deliberativo")
 
 # 1) Subida de datos
@@ -102,3 +104,47 @@ if st.button("Ejecutar DEA (CCR y BCC)"):
             mime="text/html"
         )
 
+    # 7) Generar link de descarga de reporte Excel
+    if st.button("Generar Reporte Excel"):
+        excel_io = generate_excel_report(
+            df_dea=resultados["df_ccr"],
+            df_tree=pd.DataFrame(),    # Aquí pondrías tu DataFrame real de árbol
+            df_eee=pd.DataFrame()      # Aquí tu DataFrame real de metadatos EEE
+        )
+        st.download_button(
+            label="Descargar Reporte Excel",
+            data=excel_io,
+            file_name="reporte_dea_deliberativo.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+    # 8) Generar link de descarga de reporte PPTX
+    if st.button("Generar Reporte PPTX"):
+        pptx_io = generate_pptx_report(
+            df_dea=resultados["df_ccr"],
+            df_tree=pd.DataFrame(),    # Aquí pondrías tu DataFrame real de árbol
+            df_eee=pd.DataFrame()      # Aquí tu DataFrame real de metadatos EEE
+        )
+        st.download_button(
+            label="Descargar Reporte PPTX",
+            data=pptx_io,
+            file_name="reporte_dea_deliberativo.pptx",
+            mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        )
+
+    # 9) Guardar sesión de resultados
+    save_session(
+        dmu_column=dmu_col,
+        input_cols=input_cols,
+        output_cols=output_cols,
+        results=resultados
+    )
+
+# 10) Cargar sesiones previas
+st.sidebar.subheader("Sesiones Guardadas")
+sessions = load_sessions()
+if sessions:
+    for i, sess in enumerate(sessions, start=1):
+        st.sidebar.markdown(f"**Sesión {i}:** DMU={sess['dmu_column']}, Inputs={sess['input_cols']}, Outputs={sess['output_cols']}")
+else:
+    st.sidebar.info("No hay sesiones guardadas.")
