@@ -108,6 +108,27 @@ if upload:
             st.json(result)
 
     # ------------------------------------------------------------------
+    # 2.1. NUEVO: Sugerir alternativas de Inputs/Outputs
+    # ------------------------------------------------------------------
+    if st.button("Sugerir alternativas de Inputs/Outputs"):
+        if not inputs or not outputs:
+            st.error("Selecciona primero al menos un Input y un Output.")
+        else:
+            rec = recommend_alternatives(
+                df_columns=numeric_cols,
+                inputs=inputs,
+                outputs=outputs
+            )
+            if rec.get("recommend_inputs") is not None:
+                st.subheader("Recomendaciones de Inputs")
+                st.write(rec["recommend_inputs"])
+                st.subheader("Recomendaciones de Outputs")
+                st.write(rec["recommend_outputs"])
+            else:
+                st.subheader("Recomendación (texto libre)")
+                st.write(rec.get("text", "La IA no devolvió sugerencias en formato JSON."))
+
+    # ------------------------------------------------------------------
     # 3. Ejecutar DEA
     # ------------------------------------------------------------------
     if run_button:
