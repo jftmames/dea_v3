@@ -89,7 +89,14 @@ def _dea_core(
             obj = cp.Maximize(phi)
 
         prob = cp.Problem(obj, cons)
-        prob.solve(solver=cp.SCS, verbose=False)
+        prob.solve(
+            solver=cp.ECOS,
+            abstol=1e-6,
+            reltol=1e-6,
+            feastol=1e-8,
+            verbose=False
+        )
+
 
         # extraer valor
         if orientation == "input":
