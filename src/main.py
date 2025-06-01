@@ -4,7 +4,7 @@ import streamlit as st
 import pandas as pd
 
 from data_validator import validate
-from results import mostrar_resultados
+from results import mostrar_resultados, plot_benchmark_spider, plot_slack_waterfall
 from report_generator import generate_html_report, generate_excel_report, generate_pptx_report
 from session_manager import init_db, save_session, load_sessions
 
@@ -97,22 +97,34 @@ if st.button("Ejecutar DEA (CCR y BCC)"):
     st.subheader("Scatter 3D BCC")
     st.plotly_chart(resultados["scatter3d_bcc"], use_container_width=True)
 
-    # Benchmark Spider: elegir una DMU eficiente para comparar
+    # Dentro de main.py, después de haber construido merged_ccr:
+    merged_ccr = resultados["merged_ccr"]
+
     st.subheader("Benchmark Spider (CCR)")
-    # Solo DMUs con eficiencia == 1
-    peers = resultados["merged_ccr"].query("efficiency == 1")["DMU"].tolist()
+    peers = merged_ccr.query("efficiency == 1")["DMU"].tolist()
     if peers:
         sel_dmu = st.selectbox("Seleccione una DMU eficiente para benchmark (CCR)", peers)
-        fig_spider = resultados["merged_ccr"].copy()
-        spider_fig = None
-        try:
-            from results import plot_benchmark_spider
-            spider_fig = plot_benchmark_spider(fig_spider, sel_dmu, input_cols, output_cols)
-            st.plotly_chart(spider_fig, use_container_width=True)
-        except Exception as e:
-            st.error(f"Error al generar spider: {e}")
+        # ← Aquí valida que exista:
+        if sel_dmu not in merged_ccr["DMU"].astype(str).tolist():
+            st.error(f"La DMU '{sel_dmu}' no existe en los datos mostrados.")
+        else:
+            fig_spider = plot_benchmark_spider(merged_ccr, sel_dmu, input_cols, output_cols)
+            st.plotly_chart(fig_spider, use_container_width=True)
     else:
         st.info("No hay DMUs eficientes CCR para benchmarking.")
+
+    # Segunda sección: Diagnóstico de slacks CCR
+    st.subheader("Diagnóstico de Slacks CCR")
+    sel_dmu_ccr = st.selectbox("Seleccione DMU", merged_ccr["DMU"].tolist())
+    # ← Validación:
+    if sel_dmu_ccr not in merged_ccr["DMU"].astype(str).tolist():
+        st.error(f"La DMU '{sel_dmu_ccr}' no existe.")
+    else:
+        slack_in = merged_ccr.loc[merged_ccr["DMU"] == sel_dmu_ccr, "slacks_inputs"].iloc[0]
+        slack_out = merged_ccr.loc[merged_ccr["DMU"] == sel_dmu_ccr, "slacks_outputs"].iloc[0]
+        slack_dict = {**slack_in, **slack_out}
+        fig_water = plot_slack_waterfall(slack_dict, sel_dmu_ccr)
+        st.pyplot(fig_water)
 
     # 6) Generar link de descarga de reporte HTML
     if st.button("Generar Reporte HTML"):
