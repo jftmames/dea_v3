@@ -8,6 +8,8 @@ from openai import OpenAI
 # Importamos la función de validación de dea_models/utils.py
 from dea_models.utils import validate_positive_dataframe
 
+
+
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
