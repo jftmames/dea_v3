@@ -54,20 +54,18 @@ def generate_inquiry(
     context: Optional[Dict[str, Any]] = None,
     depth: int = 2,
     breadth: int = 4,
+    temperature: float = 0.0,       # <—
 ) -> Dict[str, Any]:
-    """
-    Devuelve un árbol de subpreguntas:
-      1) intenta function-calling (JSON garantizado)
-      2) si el modelo no llama a la función, parsea JSON del texto
-      3) si todo falla o queda vacío, devuelve placeholder
-    """
-    # ---- prompt con contexto opcional ----
-    ctx_str = f"Contexto JSON:\n{json.dumps(context, indent=2)}\n\n" if context else ""
-    user_prompt = (
-        ctx_str
-        + f"Pregunta raíz: {root_question}\n"
-        f"Crea un árbol con ≤{depth} niveles y ≤{breadth} subpreguntas por nodo."
+    ...
+    resp = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "user", "content": user_prompt}],
+        tools=[{"type": "function", "function": FUNCTION_SPEC}],
+        tool_choice="auto",
+        temperature=temperature,    # <—
     )
+    ...
+
 
     # ---- 1) Function-calling ----
     resp = client.chat.completions.create(
