@@ -1,13 +1,19 @@
 # ---------- src/inquiry_engine.py ----------
 import os
 import json
+from typing import Any, Dict, Optional
+
 from openai import OpenAI
 import plotly.graph_objects as go
 
-# --- cliente OpenAI ---
+# ------------------------------------------------------------------
+# 0. Cliente OpenAI
+# ------------------------------------------------------------------
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# --- tool schema (válido y mínimo) ---
+# ------------------------------------------------------------------
+# 1. Esquema mínimo para function-calling (siempre válido)
+# ------------------------------------------------------------------
 FUNCTION_SPEC = {
     "name": "return_tree",
     "description": "Devuelve un árbol jerárquico de subpreguntas DEA.",
@@ -24,8 +30,10 @@ FUNCTION_SPEC = {
     },
 }
 
-# --- util Plotly ---
-def to_plotly_tree(tree: dict):
+# ------------------------------------------------------------------
+# 2. Utilidad: convertir dict en Treemap Plotly
+# ------------------------------------------------------------------
+def to_plotly_tree(tree: Dict[str, Any]):
     labels, parents = [], []
 
     def walk(node, parent=""):
@@ -36,45 +44,65 @@ def to_plotly_tree(tree: dict):
                 walk(kids, q)
 
     walk(tree)
-    return go.Figure(
-        go.Treemap(labels=labels, parents=parents, branchvalues="total")
-    )
+    return go.Figure(go.Treemap(labels=labels, parents=parents, branchvalues="total"))
 
-# --- generador principal ---
-def generate_inquiry(root_question: str, depth: int = 2, breadth: int = 4) -> dict:
-    """Genera árbol con 3 capas de robustez: function-call → json → placeholder."""
-    prompt = (
-        f"Pregunta raíz: {root_question}\n"
+# ------------------------------------------------------------------
+# 3. Generador principal (contexto opcional + triple robustez)
+# ------------------------------------------------------------------
+def generate_inquiry(
+    root_question: str,
+    context: Optional[Dict[str, Any]] = None,
+    depth: int = 2,
+    breadth: int = 4,
+) -> Dict[str, Any]:
+    """
+    Devuelve un árbol de subpreguntas:
+      1) intenta function-calling (JSON garantizado)
+      2) si el modelo no llama a la función, parsea JSON del texto
+      3) si todo falla o queda vacío, devuelve placeholder
+    """
+    # ---- prompt con contexto opcional ----
+    ctx_str = f"Contexto JSON:\n{json.dumps(context, indent=2)}\n\n" if context else ""
+    user_prompt = (
+        ctx_str
+        + f"Pregunta raíz: {root_question}\n"
         f"Crea un árbol con ≤{depth} niveles y ≤{breadth} subpreguntas por nodo."
     )
 
-    # ---------- 1) intento function-calling ----------
+    # ---- 1) Function-calling ----
     resp = client.chat.completions.create(
         model="gpt-4o",
-        messages=[{"role": "user", "content": prompt}],
+        messages=[{"role": "user", "content": user_prompt}],
         tools=[{"type": "function", "function": FUNCTION_SPEC}],
         tool_choice="auto",
         temperature=0,
     )
 
+    # a) Si llamó a la función → parsear arguments
     if resp.choices[0].message.tool_calls:
-        args = resp.choices[0].message.tool_calls[0].function.arguments
+        args_json = resp.choices[0].message.tool_calls[0].function.arguments
         try:
-            data = json.loads(args)
-            return data.get("tree", data) or _placeholder_tree(root_question)
+            data = json.loads(args_json)
+            tree = data.get("tree", data)
+            if tree:
+                return tree
         except json.JSONDecodeError:
-            pass  # caeremos al fallback de texto
+            pass  # continuará al fallback de texto
 
-    # ---------- 2) intento parsear texto tradicional ----------
+    # b) Fallback: intentar JSON en contenido textual
     raw = resp.choices[0].message.content.strip()
     try:
-        return json.loads(raw) or _placeholder_tree(root_question)
+        tree = json.loads(raw)
+        if tree:
+            return tree
     except Exception:
-        return _placeholder_tree(root_question)
+        pass
 
+    # ---- 3) Placeholder si todo falla ----
+    return _placeholder_tree(root_question)
 
-def _placeholder_tree(root_q: str):
-    """Devuelve un árbol mínimo para evitar que la app quede vacía."""
+# ------------------------------------------------------------------
+# 4. Placeholder para no romper la app
+# ------------------------------------------------------------------
+def _placeholder_tree(root_q: str) -> Dict[str, Any]:
     return {root_q: {"ℹ️": "No se pudo generar subpreguntas"}}
-
-
