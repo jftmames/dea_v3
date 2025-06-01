@@ -58,7 +58,6 @@ def _dea_core(
             mask[i] = False
             X_mat = X[:, mask]
             Y_mat = Y[:, mask]
-            idx_map = np.arange(n)[mask]
             num_vars = n - 1
         else:
             X_mat = X
@@ -72,8 +71,8 @@ def _dea_core(
             theta = cp.Variable()
             # restricciones input-oriented
             cons = [
-                Y_mat @ lambdas >= (Y[:, [i]]),
-                X_mat @ lambdas <= theta * (X[:, [i]]),
+                Y_mat @ lambdas >= Y[:, [i]],
+                X_mat @ lambdas <= theta * X[:, [i]],
             ]
             if rts == "VRS":
                 cons.append(cp.sum(lambdas) == 1)
@@ -81,8 +80,8 @@ def _dea_core(
         else:  # output-oriented
             phi = cp.Variable()
             cons = [
-                Y_mat @ lambdas >= phi * (Y[:, [i]]),
-                X_mat @ lambdas <= (X[:, [i]]),
+                Y_mat @ lambdas >= phi * Y[:, [i]],
+                X_mat @ lambdas <= X[:, [i]],
             ]
             if rts == "VRS":
                 cons.append(cp.sum(lambdas) == 1)
@@ -96,7 +95,6 @@ def _dea_core(
             feastol=1e-8,
             verbose=False
         )
-
 
         # extraer valor
         if orientation == "input":
@@ -148,7 +146,10 @@ def run_dea(
     eff = _dea_core(X, Y, rts=rts, orientation=orientation, super_eff=super_eff)
 
     # 5) Preparar el DataFrame de salida
-    dmu_ids = df.index.astype(str) if "DMU" not in df.columns else df["DMU"].astype(str)
+    if "DMU" in df.columns:
+        dmu_ids = df["DMU"].astype(str)
+    else:
+        dmu_ids = df.index.astype(str)
 
     return pd.DataFrame({
         "DMU": dmu_ids,
