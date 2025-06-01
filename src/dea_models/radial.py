@@ -1,4 +1,4 @@
-# dea_models/radial.py
+# src/dea_models/radial.py
 
 import numpy as np
 import cvxpy as cp
@@ -142,31 +142,98 @@ def run_ccr(
     input_cols: list[str],
     output_cols: list[str],
     orientation: str = "input",
-    super_eff: bool = False,
+    super_eff: bool = False
 ) -> pd.DataFrame:
     """
-    Ejecuta DEA CCR radial (input/output, opcional super-eficiencia).
-    Parámetros:
-      df: DataFrame original
-      dmu_column: nombre de la columna que identifica cada DMU
-      input_cols: lista de columnas de inputs
-      output_cols: lista de columnas de outputs
-      orientation: "input" o "output"
-      super_eff: True para super-eficiencia
-    Retorna:
-      DataFrame con columnas [DMU, efficiency, model, orientation, super_eff]
+    Ejecuta CCR radial y retorna DataFrame con columnas:
+      DMU, tec_efficiency_ccr, lambda_vector, slacks_inputs, slacks_outputs, rts_label
     """
     if dmu_column not in df.columns:
-        raise ValueError(f"La columna DMU '{dmu_column}' no existe en el DataFrame.")
+        raise ValueError(f"La columna DMU '{dmu_column}' no existe.")
 
-    return _run_dea_internal(
-        df=df,
-        inputs=input_cols,
-        outputs=output_cols,
-        model="CCR",
-        orientation=orientation,
-        super_eff=super_eff
-    )
+    # Validar que todos los inputs y outputs sean positivos
+    cols = input_cols + output_cols
+    validate_positive_dataframe(df, cols)
+
+    # Matrices de datos
+    X = df[input_cols].to_numpy().T  # shape: (m, n)
+    Y = df[output_cols].to_numpy().T  # shape: (s, n)
+    dmus = df[dmu_column].astype(str).tolist()
+    n = X.shape[1]  # número de DMUs
+    m = X.shape[0]  # número de inputs
+    s = Y.shape[0]  # número de outputs
+
+    resultados = []
+    for i in range(n):
+        # Variables de decisión
+        lambdas = cp.Variable((n, 1), nonneg=True)
+        theta = cp.Variable()
+        slacks_in = cp.Variable((m, 1), nonneg=True)
+        slacks_out = cp.Variable((s, 1), nonneg=True)
+
+        # Observaciones de la DMU i
+        x0 = X[:, [i]]
+        y0 = Y[:, [i]]
+
+        cons = []
+        # Restricciones principales
+        cons.append(Y @ lambdas >= y0)
+        cons.append(X @ lambdas + slacks_in == theta * x0)
+        cons.append(Y @ lambdas - slacks_out == y0)
+
+        if super_eff:
+            mask = np.ones(n, dtype=bool)
+            mask[i] = False
+            # Ajustar X_mat, Y_mat y lambdas para excluir la DMU i
+            # Re-crear variables para el problema de super-eficiencia
+            lambdas = cp.Variable((n - 1, 1), nonneg=True)
+            X_mat = X[:, mask]
+            Y_mat = Y[:, mask]
+            cons = [
+                Y_mat @ lambdas >= y0,
+                X_mat @ lambdas + slacks_in == theta * x0,
+                Y_mat @ lambdas - slacks_out == y0,
+            ]
+
+        # No hay restricción Σλ = 1 en CCR (CRS)
+        obj = cp.Minimize(theta)
+        prob = cp.Problem(obj, cons)
+        prob.solve(
+            solver=cp.ECOS,
+            abstol=1e-6,
+            reltol=1e-6,
+            feastol=1e-8,
+            verbose=False
+        )
+
+        # Extracción de valores
+        theta_val = float(theta.value) if theta.value is not None else np.nan
+
+        # Vector lambda
+        if super_eff:
+            lambdas_vals = {}
+            idx = 0
+            for j in range(n):
+                if j == i:
+                    continue
+                lambdas_vals[dmus[j]] = float(lambdas.value[idx])
+                idx += 1
+        else:
+            lambdas_vals = {dmus[j]: float(lambdas.value[j]) for j in range(n)}
+
+        slacks_input = {input_cols[k]: float(slacks_in.value[k]) for k in range(m)}
+        slacks_output = {output_cols[r]: float(slacks_out.value[r]) for r in range(s)}
+
+        resultados.append({
+            dmu_column: dmus[i],
+            "tec_efficiency_ccr": theta_val,
+            "lambda_vector": lambdas_vals,
+            "slacks_inputs": slacks_input,
+            "slacks_outputs": slacks_output,
+            "rts_label": "CRS"   # CCR siempre CRS
+        })
+
+    return pd.DataFrame(resultados)
 
 
 def run_bcc(
@@ -192,3 +259,4 @@ def run_bcc(
         orientation=orientation,
         super_eff=super_eff
     )
+
