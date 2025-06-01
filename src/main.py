@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import json
 
 from data_validator import validate
 from dea_analyzer import run_dea
@@ -33,10 +34,7 @@ if upload:
     st.subheader("Vista previa")
     st.dataframe(df.head(), use_container_width=True)
 
-    # Validar que al menos haya 2 DMU si esperan usar BCC o super-eficiencia
     num_dmu = df.shape[0]
-
-    # solo columnas numéricas para Inputs / Outputs
     numeric_cols = df.select_dtypes(include="number").columns.tolist()
     if not numeric_cols:
         st.error("⚠️ El archivo no contiene columnas numéricas.")
@@ -131,13 +129,15 @@ if upload:
         st.session_state["dea_model"] = model
         st.session_state["dea_orientation"] = orientation
         st.session_state["dea_super_eff"] = super_eff
+        # Reiniciamos árbol previo (si existía)
+        if "last_tree" in st.session_state:
+            del st.session_state["last_tree"]
 
     # ------------------------------------------------------------------
     # 4. Mostrar Resultados DEA y habilitar exportaciones, árbol y EEE
     # ------------------------------------------------------------------
     if "res_df" in st.session_state:
         dea_df = st.session_state["res_df"]
-        # Leemos los parámetros desde session_state
         model = st.session_state["dea_model"]
         orientation = st.session_state["dea_orientation"]
         super_eff = st.session_state["dea_super_eff"]
@@ -208,76 +208,100 @@ if upload:
                         temperature=0.3,
                     )
 
-                # 4.4 Mostrar árbol y JSON completo
-                st.plotly_chart(to_plotly_tree(tree), use_container_width=True)
-                with st.expander("JSON completo"):
-                    st.json(tree)
+                # Guardamos el árbol en sesión
+                st.session_state["last_tree"] = tree
 
-                # 4.5 Cálculo y visualización del EEE
-                from epistemic_metrics import compute_eee
+        # Si ya existe un árbol guardado (incluso sin pulsar Crear árbol en esta carga)
+        if "last_tree" in st.session_state:
+            tree = st.session_state["last_tree"]
 
-                eee_score = compute_eee(tree, depth_limit=depth, breadth_limit=breadth)
-                st.metric(label="Índice de Equilibrio Erotético (EEE)", value=eee_score)
+            # 4.4 Mostrar árbol
+            st.subheader("Árbol de Indagación (último generado)")
+            st.plotly_chart(to_plotly_tree(tree), use_container_width=True)
 
-                # 4.6 Exportaciones (CSV/JSON y reporte HTML)
-                # A) Aplanar el árbol para CSV
-                def _flatten_tree(tree: dict, parent: str = "") -> list[tuple[str, str]]:
-                    rows = []
-                    for q, kids in tree.items():
-                        rows.append((q, parent))
-                        if isinstance(kids, dict):
-                            rows.extend(_flatten_tree(kids, q))
-                    return rows
+            # 4.5 JSON editable (opcional)
+            st.markdown("**Editar árbol JSON (opcional)**")
+            json_text = json.dumps(tree, ensure_ascii=False, indent=2)
+            edited = st.text_area("Árbol JSON", value=json_text, height=200)
+            if st.button("Actualizar árbol"):
+                try:
+                    new_tree = json.loads(edited)
+                    # Validación mínima: debe ser dict con al menos 1 clave
+                    if isinstance(new_tree, dict) and new_tree:
+                        st.session_state["last_tree"] = new_tree
+                        st.success("Árbol actualizado correctamente.")
+                    else:
+                        st.error("El JSON debe ser un objeto con al menos un nodo.")
+                except Exception as e:
+                    st.error(f"JSON inválido: {e}")
 
-                flat = _flatten_tree(tree)
-                df_tree = pd.DataFrame(flat, columns=["question", "parent"])
-                csv_tree = df_tree.to_csv(index=False).encode("utf-8")
-                st.download_button(
-                    label="📥 Descargar árbol (CSV)",
-                    data=csv_tree,
-                    file_name="inquiry_tree.csv",
-                    mime="text/csv",
-                )
+            with st.expander("Ver JSON completo"):
+                st.json(st.session_state["last_tree"])
 
-                # B) Descargar árbol en JSON
-                import json
-                json_tree = json.dumps(tree, ensure_ascii=False, indent=2).encode("utf-8")
-                st.download_button(
-                    label="📥 Descargar árbol (JSON)",
-                    data=json_tree,
-                    file_name="inquiry_tree.json",
-                    mime="application/json",
-                )
+            # 4.6 Cálculo y visualización del EEE sobre el árbol guardado
+            from epistemic_metrics import compute_eee
 
-                # C) CSV con metadatos EEE
-                eee_meta = {
-                    "DMU": dmu,
-                    "model": model,
-                    "orientation": orientation,
-                    "super_eff": super_eff,
-                    "depth": depth,
-                    "breadth": breadth,
-                    "EEE_score": eee_score,
-                }
-                df_eee = pd.DataFrame.from_records([eee_meta])
-                csv_eee = df_eee.to_csv(index=False).encode("utf-8")
-                st.download_button(
-                    label="📥 Descargar EEE (CSV)",
-                    data=csv_eee,
-                    file_name="eee_meta.csv",
-                    mime="text/csv",
-                )
+            eee_score = compute_eee(tree, depth_limit=depth, breadth_limit=breadth)
+            st.metric(label="Índice de Equilibrio Erotético (EEE)", value=eee_score)
 
-                # D) Reporte HTML completo
-                from report_generator import generate_html_report
+            # 4.7 Exportaciones (CSV/JSON y reporte HTML)
+            # A) Aplanar el árbol para CSV
+            def _flatten_tree(tree: dict, parent: str = "") -> list[tuple[str, str]]:
+                rows = []
+                for q, kids in tree.items():
+                    rows.append((q, parent))
+                    if isinstance(kids, dict):
+                        rows.extend(_flatten_tree(kids, q))
+                return rows
 
-                html_report = generate_html_report(
-                    df_dea=dea_df, df_tree=df_tree, df_eee=df_eee
-                )
-                html_bytes = html_report.encode("utf-8")
-                st.download_button(
-                    label="📥 Descargar reporte completo (HTML)",
-                    data=html_bytes,
-                    file_name="reporte_dea_deliberativo.html",
-                    mime="text/html",
-                )
+            flat = _flatten_tree(tree)
+            df_tree = pd.DataFrame(flat, columns=["question", "parent"])
+            csv_tree = df_tree.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                label="📥 Descargar árbol (CSV)",
+                data=csv_tree,
+                file_name="inquiry_tree.csv",
+                mime="text/csv",
+            )
+
+            # B) Descargar árbol en JSON
+            json_tree_bytes = json.dumps(tree, ensure_ascii=False, indent=2).encode("utf-8")
+            st.download_button(
+                label="📥 Descargar árbol (JSON)",
+                data=json_tree_bytes,
+                file_name="inquiry_tree.json",
+                mime="application/json",
+            )
+
+            # C) CSV con metadatos EEE
+            eee_meta = {
+                "DMU": dmu,
+                "model": model,
+                "orientation": orientation,
+                "super_eff": super_eff,
+                "depth": depth,
+                "breadth": breadth,
+                "EEE_score": eee_score,
+            }
+            df_eee = pd.DataFrame.from_records([eee_meta])
+            csv_eee = df_eee.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                label="📥 Descargar EEE (CSV)",
+                data=csv_eee,
+                file_name="eee_meta.csv",
+                mime="text/csv",
+            )
+
+            # D) Reporte HTML completo
+            from report_generator import generate_html_report
+
+            html_report = generate_html_report(
+                df_dea=dea_df, df_tree=df_tree, df_eee=df_eee
+            )
+            html_bytes = html_report.encode("utf-8")
+            st.download_button(
+                label="📥 Descargar reporte completo (HTML)",
+                data=html_bytes,
+                file_name="reporte_dea_deliberativo.html",
+                mime="text/html",
+            )
