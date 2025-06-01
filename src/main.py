@@ -151,3 +151,54 @@ if "res_df" in st.session_state:
 
             eee_score = compute_eee(tree, depth_limit=depth, breadth_limit=breadth)
             st.metric(label="Índice de Equilibrio Erotético (EEE)", value=eee_score)
+
+# ... después de st.dataframe(res, use_container_width=True) ...
+
+# --- 6.1 botón para exportar DEA a CSV ---
+csv_dea = st.session_state["res_df"].to_csv(index=False).encode("utf-8")
+st.download_button(
+    label="📥 Descargar resultados DEA (CSV)",
+    data=csv_dea,
+    file_name="dea_results.csv",
+    mime="text/csv",
+)
+
+# --- aplanar el árbol para CSV ---
+def _flatten_tree(tree: dict, parent: str = "") -> list[tuple[str, str]]:
+    rows = []
+    for q, kids in tree.items():
+        rows.append((q, parent))
+        if isinstance(kids, dict):
+            rows.extend(_flatten_tree(kids, q))
+    return rows
+
+flat = _flatten_tree(tree)  # [(pregunta, padre), …]
+df_tree = pd.DataFrame(flat, columns=["question", "parent"])
+
+csv_tree = df_tree.to_csv(index=False).encode("utf-8")
+st.download_button(
+    label="📥 Descargar árbol (CSV)",
+    data=csv_tree,
+    file_name="inquiry_tree.csv",
+    mime="text/csv",
+)
+
+# --- CSV con el EEE y configuración ---
+eee_meta = {
+    "DMU": dmu,
+    "model": model,
+    "orientation": orientation,
+    "super_eff": super_eff,
+    "depth": depth,
+    "breadth": breadth,
+    "EEE_score": eee_score,
+}
+df_eee = pd.DataFrame.from_records([eee_meta])
+csv_eee = df_eee.to_csv(index=False).encode("utf-8")
+st.download_button(
+    label="📥 Descargar EEE (CSV)",
+    data=csv_eee,
+    file_name="eee_meta.csv",
+    mime="text/csv",
+)
+
