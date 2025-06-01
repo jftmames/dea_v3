@@ -92,7 +92,7 @@ if upload:
         st.dataframe(res, use_container_width=True)
 
 # ------------------------------------------------------------------
-# 5. Complejos de Indagación
+# 5. Complejos de Indagación y Cálculo de EEE
 # ------------------------------------------------------------------
 if "res_df" in st.session_state:
     ineff_df = st.session_state["res_df"].query("efficiency < 1")
@@ -107,7 +107,7 @@ if "res_df" in st.session_state:
 
         if st.button("Crear árbol"):
 
-            # localizar la fila de la DMU
+            # localizar la fila de la DMU de forma segura
             row = _get_row_by_dmu(df, dmu)
             if row.empty:
                 st.error(f"No se encontró la DMU '{dmu}' en el DataFrame original.")
@@ -145,16 +145,9 @@ if "res_df" in st.session_state:
             st.plotly_chart(to_plotly_tree(tree), use_container_width=True)
             with st.expander("JSON completo"):
                 st.json(tree)
-from epistemic_metrics import compute_eee
 
-# … dentro del bloque “Crear árbol” …
-with st.spinner("Generando árbol…"):
-    tree = generate_inquiry( … )
+            # Cálculo y visualización del EEE
+            from epistemic_metrics import compute_eee
 
-st.plotly_chart(to_plotly_tree(tree), use_container_width=True)
-with st.expander("JSON completo"):
-    st.json(tree)
-
-# --- Cálculo y visualización del EEE ---
-eee_score = compute_eee(tree, depth_limit=depth, breadth_limit=breadth)
-st.metric(label="Índice de Equilibrio Erotético (EEE)", value=eee_score)
+            eee_score = compute_eee(tree, depth_limit=depth, breadth_limit=breadth)
+            st.metric(label="Índice de Equilibrio Erotético (EEE)", value=eee_score)
