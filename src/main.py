@@ -22,13 +22,24 @@ if archivo is None:
 df = pd.read_csv(archivo)
 
 # 2) Seleccionar columna DMU
-dmu_col = st.selectbox("Columna DMU (identificador)", df.columns)
+dmu_col = st.selectbox(
+    "Columna DMU (identificador)",
+    df.columns,
+    help="Seleccione la columna que identifica cada unidad (DMU)."
+)
 
 # 3) Seleccionar inputs y outputs
-cols = list(df.columns)
-cols.remove(dmu_col)
-input_cols = st.multiselect("Seleccione columnas de Inputs", cols)
-output_cols = st.multiselect("Seleccione columnas de Outputs", cols)
+input_cols = st.multiselect(
+    "Seleccione columnas de Inputs",
+    [c for c in df.columns if c != dmu_col],
+    help="Lista de columnas usadas como insumos. Deben ser numéricas y > 0."
+)
+
+output_cols = st.multiselect(
+    "Seleccione columnas de Outputs",
+    [c for c in df.columns if c != dmu_col],
+    help="Lista de columnas usadas como productos. Deben ser numéricas y > 0."
+)
 
 if len(input_cols) < 1 or len(output_cols) < 1:
     st.info("Debes seleccionar al menos una columna de input y una de output.")
@@ -74,11 +85,11 @@ if st.button("Ejecutar DEA (CCR y BCC)"):
 
     # Benchmark Spider: elegir una DMU eficiente para comparar
     st.subheader("Benchmark Spider (CCR)")
-    # Solo DMUs con eficiencia==1
+    # Solo DMUs con eficiencia == 1
     peers = resultados["merged_ccr"].query("efficiency == 1")["DMU"].tolist()
     if peers:
         sel_dmu = st.selectbox("Seleccione una DMU eficiente para benchmark (CCR)", peers)
-        fig_spider = resultados["merged_ccr"].copy()  # DataFrame con columns 'DMU', inputs, outputs, 'efficiency'
+        fig_spider = resultados["merged_ccr"].copy()
         spider_fig = None
         try:
             from results import plot_benchmark_spider
@@ -93,10 +104,9 @@ if st.button("Ejecutar DEA (CCR y BCC)"):
     if st.button("Generar Reporte HTML"):
         html_content = generate_html_report(
             df_dea=resultados["df_ccr"],
-            df_tree=pd.DataFrame(),    # Aquí pondrías tu DataFrame real de árbol
-            df_eee=pd.DataFrame()      # Aquí tu DataFrame real de metadatos EEE
+            df_tree=pd.DataFrame(),    # Aquí iría el DataFrame real del árbol
+            df_eee=pd.DataFrame()      # Aquí iría el DataFrame real de métricas EEE
         )
-        # Mostrar link de descarga
         st.download_button(
             label="Descargar Reporte HTML",
             data=html_content,
@@ -108,8 +118,8 @@ if st.button("Ejecutar DEA (CCR y BCC)"):
     if st.button("Generar Reporte Excel"):
         excel_io = generate_excel_report(
             df_dea=resultados["df_ccr"],
-            df_tree=pd.DataFrame(),    # Aquí pondrías tu DataFrame real de árbol
-            df_eee=pd.DataFrame()      # Aquí tu DataFrame real de metadatos EEE
+            df_tree=pd.DataFrame(),    # Aquí iría el DataFrame real del árbol
+            df_eee=pd.DataFrame()      # Aquí iría el DataFrame real de métricas EEE
         )
         st.download_button(
             label="Descargar Reporte Excel",
@@ -122,8 +132,8 @@ if st.button("Ejecutar DEA (CCR y BCC)"):
     if st.button("Generar Reporte PPTX"):
         pptx_io = generate_pptx_report(
             df_dea=resultados["df_ccr"],
-            df_tree=pd.DataFrame(),    # Aquí pondrías tu DataFrame real de árbol
-            df_eee=pd.DataFrame()      # Aquí tu DataFrame real de metadatos EEE
+            df_tree=pd.DataFrame(),    # Aquí iría el DataFrame real del árbol
+            df_eee=pd.DataFrame()      # Aquí iría el DataFrame real de métricas EEE
         )
         st.download_button(
             label="Descargar Reporte PPTX",
@@ -145,6 +155,8 @@ st.sidebar.subheader("Sesiones Guardadas")
 sessions = load_sessions()
 if sessions:
     for i, sess in enumerate(sessions, start=1):
-        st.sidebar.markdown(f"**Sesión {i}:** DMU={sess['dmu_column']}, Inputs={sess['input_cols']}, Outputs={sess['output_cols']}")
+        st.sidebar.markdown(
+            f"**Sesión {i}:** DMU={sess['dmu_column']}, Inputs={sess['input_cols']}, Outputs={sess['output_cols']}"
+        )
 else:
     st.sidebar.info("No hay sesiones guardadas.")
