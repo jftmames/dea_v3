@@ -101,13 +101,21 @@ if upload:
                 st.error(f"❌ {e}")
                 st.stop()
 
+        # Guardamos en session_state el DataFrame y los parámetros usados
         st.session_state["res_df"] = res
+        st.session_state["dea_model"] = model
+        st.session_state["dea_orientation"] = orientation
+        st.session_state["dea_super_eff"] = super_eff
 
     # ------------------------------------------------------------------
     # 5. Mostrar Resultados DEA y habilitar exportaciones, árbol y EEE
     # ------------------------------------------------------------------
     if "res_df" in st.session_state:
         dea_df = st.session_state["res_df"]
+        # Leemos los parámetros de session_state
+        model = st.session_state["dea_model"]
+        orientation = st.session_state["dea_orientation"]
+        super_eff = st.session_state["dea_super_eff"]
 
         # 5.1 Mostrar tabla de eficiencias
         st.subheader(f"Resultados DEA ({model}-{orientation})")
