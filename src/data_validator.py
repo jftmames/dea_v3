@@ -2,6 +2,8 @@ import os
 import json
 import pandas as pd
 from openai import OpenAI
+# src/data_validator.py
+from dea_models.utils import validate_positive_dataframe
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
