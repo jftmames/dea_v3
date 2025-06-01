@@ -5,6 +5,11 @@ import json
 from data_validator import validate
 from dea_analyzer import run_dea
 from inquiry_engine import generate_inquiry, to_plotly_tree
+from results import (
+    plot_efficiency_histogram,
+    plot_3d_inputs_outputs,
+    plot_benchmark_spider,
+)
 
 
 # ---------- util: obtener la fila de la DMU ----------
@@ -139,7 +144,7 @@ if upload:
         st.success("✅ DEA calculado correctamente")
 
     # ------------------------------------------------------------------
-    # 4. Mostrar Resultados DEA y habilitar exportaciones, árbol y EEE
+    # 4. Mostrar Resultados DEA y habilitar exportaciones, árbol, EEE y gráficos
     # ------------------------------------------------------------------
     if "res_df" in st.session_state:
         dea_df = st.session_state["res_df"]
@@ -160,7 +165,46 @@ if upload:
             mime="text/csv",
         )
 
-        # 4.3 Filtrar DMU ineficientes
+        # 4.3 Visualizaciones interactivas
+        st.markdown("---")
+        st.subheader("Visualizaciones interactivas")
+
+        # A) Histograma de eficiencias
+        with st.expander("📊 Histograma de Eficiencias"):
+            hist_fig = plot_efficiency_histogram(dea_df, bins=20)
+            st.plotly_chart(hist_fig, use_container_width=True)
+
+        # B) Scatter 3D inputs vs outputs
+        if len(inputs) >= 2 and len(outputs) >= 1:
+            with st.expander("🔍 Scatter 3D Inputs vs Output (coloreado por eficiencia)"):
+                scatter3d_fig = plot_3d_inputs_outputs(df, inputs, outputs, dea_df)
+                st.plotly_chart(scatter3d_fig, use_container_width=True)
+        else:
+            st.info("Se requieren ≥2 Inputs y ≥1 Output para el Scatter 3D.")
+
+        # C) Benchmark Spider
+        with st.expander("🕸️ Benchmark Spider para DMU seleccionada"):
+            if dea_df.query("efficiency == 1").empty:
+                st.info("No hay DMU eficientes (efficiency == 1) para benchmark.")
+            else:
+                selected_dmu = st.selectbox("Elige DMU para spider", dea_df["DMU"])
+                try:
+                    merged_for_spider = dea_df.merge(
+                        df[inputs + outputs + (["DMU"] if "DMU" in df.columns else [])],
+                        on="DMU",
+                        how="left"
+                    )
+                    spider_fig = plot_benchmark_spider(
+                        merged_for_spider,
+                        selected_dmu,
+                        inputs,
+                        outputs
+                    )
+                    st.plotly_chart(spider_fig, use_container_width=True)
+                except Exception as e:
+                    st.error(f"Imposible generar Spider: {e}")
+
+        # 4.4 Filtrar DMU ineficientes
         ineff_df = dea_df.query("efficiency < 1")
         if len(ineff_df) == 0:
             st.info("Todas las DMU son eficientes.")
@@ -217,15 +261,14 @@ if upload:
                 st.session_state["last_tree"] = tree
                 st.success("✅ Árbol generado correctamente")
 
-        # Si ya existe un árbol guardado (incluso tras recarga)
+        # 4.5 Mostrar árbol si existe
         if "last_tree" in st.session_state:
             tree = st.session_state["last_tree"]
 
-            # 4.4 Mostrar árbol
             st.subheader("Árbol de Indagación (último generado)")
             st.plotly_chart(to_plotly_tree(tree), use_container_width=True)
 
-            # 4.5 JSON editable
+            # 4.6 JSON editable
             st.markdown("**Editar árbol JSON (opcional)**")
             json_text = json.dumps(tree, ensure_ascii=False, indent=2)
             edited = st.text_area("Árbol JSON", value=json_text, height=200)
@@ -243,13 +286,13 @@ if upload:
             with st.expander("Ver JSON completo"):
                 st.json(st.session_state["last_tree"])
 
-            # 4.6 Cálculo y visualización del EEE
+            # 4.7 Cálculo y visualización del EEE
             from epistemic_metrics import compute_eee
 
             eee_score = compute_eee(tree, depth_limit=depth, breadth_limit=breadth)
             st.metric(label="Índice de Equilibrio Erotético (EEE)", value=eee_score)
 
-            # 4.7 Exportaciones (CSV/JSON y reporte HTML)
+            # 4.8 Exportaciones (CSV/JSON y reporte HTML)
             def _flatten_tree(tree: dict, parent: str = "") -> list[tuple[str, str]]:
                 rows = []
                 for q, kids in tree.items():
