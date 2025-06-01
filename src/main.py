@@ -387,8 +387,7 @@ if upload:
             eee_score = compute_eee(tree, depth_limit=depth, breadth_limit=breadth)
             st.metric(
                 label="Índice de Equilibrio Erotético (EEE)",
-                value=eee_score,
-                key="eee_metric"
+                value=eee_score
             )
 
             # Exportaciones del árbol y del EEE
