@@ -9,5 +9,6 @@ from .cross_efficiency import compute_cross_efficiency
 from .window_analysis import run_window_dea
 from .stochastic import run_stochastic_dea, bootstrap_efficiencies
 from .visualizations import plot_slack_waterfall
+from .auto_tuner import generate_candidates, evaluate_candidates
 
 
