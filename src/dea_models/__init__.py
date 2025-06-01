@@ -7,4 +7,3 @@ Por ahora solo exportamos radial y utils; los demás módulos se implementarán 
 
 from .utils import validate_positive_dataframe, check_positive_data, check_zero_negative_data
 from .radial import run_ccr, run_bcc
-
