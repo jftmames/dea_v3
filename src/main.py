@@ -54,12 +54,32 @@ if upload:
         st.json(result)
 
     # ------------------------------------------------------------------
-    # 3. Ejecutar DEA
+    # 3. Parámetros de DEA: modelo, orientación y super-eficiencia
     # ------------------------------------------------------------------
-    if st.button("Ejecutar DEA (CCR input)"):
+    st.markdown("### Configuración del modelo DEA")
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        model = st.selectbox("Modelo", ["CCR", "BCC"], index=0, help="CCR = retornos constantes (CRS); BCC = retornos variables (VRS)")
+    with col2:
+        orientation = st.selectbox("Orientación", ["input", "output"], index=0, help="input‐oriented o output‐oriented")
+    with col3:
+        super_eff = st.checkbox("Super-eficiencia", value=False, help="Excluir DMU actual para super-eficiencia")
+
+    # ------------------------------------------------------------------
+    # 4. Ejecutar DEA
+    # ------------------------------------------------------------------
+    if st.button(f"Ejecutar DEA ({model}-{orientation})"):
         with st.spinner("Optimizando…"):
             try:
-                res = run_dea(df, inputs, outputs, model="CCR")
+                res = run_dea(
+                    df,
+                    inputs,
+                    outputs,
+                    model=model,
+                    orientation=orientation,
+                    super_eff=super_eff,
+                )
                 if res["efficiency"].isna().all():
                     st.error("⚠️ El solver no devolvió soluciones válidas.")
                     st.stop()
@@ -68,11 +88,11 @@ if upload:
                 st.stop()
 
         st.session_state["res_df"] = res
-        st.subheader("Eficiencias CCR")
+        st.subheader(f"Eficiencias DEA ({model}-{orientation})")
         st.dataframe(res, use_container_width=True)
 
 # ------------------------------------------------------------------
-# 4. Complejos de Indagación
+# 5. Complejos de Indagación
 # ------------------------------------------------------------------
 if "res_df" in st.session_state:
     ineff_df = st.session_state["res_df"].query("efficiency < 1")
@@ -108,6 +128,9 @@ if "res_df" in st.session_state:
                     .query("efficiency == 1")["DMU"]
                     .tolist()
                 ),
+                "model": model,
+                "orientation": orientation,
+                "super_eff": super_eff,
             }
 
             with st.spinner("Generando árbol…"):
