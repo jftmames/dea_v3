@@ -103,125 +103,125 @@ if upload:
 
         st.session_state["res_df"] = res
 
-# ------------------------------------------------------------------
-# 5. Mostrar Resultados DEA y habilitar exportaciones, árbol y EEE
-# ------------------------------------------------------------------
-if "res_df" in st.session_state:
-    dea_df = st.session_state["res_df"]
+    # ------------------------------------------------------------------
+    # 5. Mostrar Resultados DEA y habilitar exportaciones, árbol y EEE
+    # ------------------------------------------------------------------
+    if "res_df" in st.session_state:
+        dea_df = st.session_state["res_df"]
 
-    # 5.1 Mostrar tabla de eficiencias
-    st.subheader(f"Resultados DEA ({model}-{orientation})")
-    st.dataframe(dea_df, use_container_width=True)
+        # 5.1 Mostrar tabla de eficiencias
+        st.subheader(f"Resultados DEA ({model}-{orientation})")
+        st.dataframe(dea_df, use_container_width=True)
 
-    # 5.2 Botón para exportar DEA a CSV
-    csv_dea = dea_df.to_csv(index=False).encode("utf-8")
-    st.download_button(
-        label="📥 Descargar resultados DEA (CSV)",
-        data=csv_dea,
-        file_name="dea_results.csv",
-        mime="text/csv",
-    )
+        # 5.2 Botón para exportar DEA a CSV
+        csv_dea = dea_df.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            label="📥 Descargar resultados DEA (CSV)",
+            data=csv_dea,
+            file_name="dea_results.csv",
+            mime="text/csv",
+        )
 
-    # 5.3 Filtrar DMU ineficientes
-    ineff_df = dea_df.query("efficiency < 1")
-    if len(ineff_df) == 0:
-        st.info("Todas las DMU son eficientes.")
-    else:
-        st.subheader("Generar Complejo de Indagación")
-        dmu = st.selectbox("DMU ineficiente", ineff_df["DMU"])
+        # 5.3 Filtrar DMU ineficientes
+        ineff_df = dea_df.query("efficiency < 1")
+        if len(ineff_df) == 0:
+            st.info("Todas las DMU son eficientes.")
+        else:
+            st.subheader("Generar Complejo de Indagación")
+            dmu = st.selectbox("DMU ineficiente", ineff_df["DMU"])
 
-        depth = st.slider("Niveles", 2, 4, 3)
-        breadth = st.slider("Subpreguntas / nodo", 3, 8, 5)
+            depth = st.slider("Niveles", 2, 4, 3)
+            breadth = st.slider("Subpreguntas / nodo", 3, 8, 5)
 
-        if st.button("Crear árbol"):
+            if st.button("Crear árbol"):
 
-            # localizar la fila de la DMU
-            row = _get_row_by_dmu(df, dmu)
-            if row.empty:
-                st.error(f"No se encontró la DMU '{dmu}' en el DataFrame original.")
-                st.stop()
+                # localizar la fila de la DMU
+                row = _get_row_by_dmu(df, dmu)
+                if row.empty:
+                    st.error(f"No se encontró la DMU '{dmu}' en el DataFrame original.")
+                    st.stop()
 
-            # contexto rico para el modelo
-            context = {
-                "dmu": dmu,
-                "inputs": {c: float(row[c].values[0]) for c in inputs},
-                "outputs": {c: float(row[c].values[0]) for c in outputs},
-                "efficiency": float(
-                    dea_df.set_index("DMU", drop=False).loc[dmu, "efficiency"]
-                ),
-                "peers": dea_df.query("efficiency == 1")["DMU"].tolist(),
-                "model": model,
-                "orientation": orientation,
-                "super_eff": super_eff,
-            }
+                # contexto rico para el modelo
+                context = {
+                    "dmu": dmu,
+                    "inputs": {c: float(row[c].values[0]) for c in inputs},
+                    "outputs": {c: float(row[c].values[0]) for c in outputs},
+                    "efficiency": float(
+                        dea_df.set_index("DMU", drop=False).loc[dmu, "efficiency"]
+                    ),
+                    "peers": dea_df.query("efficiency == 1")["DMU"].tolist(),
+                    "model": model,
+                    "orientation": orientation,
+                    "super_eff": super_eff,
+                }
 
-            with st.spinner("Generando árbol…"):
-                tree = generate_inquiry(
-                    f"¿Por qué la {dmu} es ineficiente?",
-                    context=context,
-                    depth=depth,
-                    breadth=breadth,
-                    temperature=0.3,
+                with st.spinner("Generando árbol…"):
+                    tree = generate_inquiry(
+                        f"¿Por qué la {dmu} es ineficiente?",
+                        context=context,
+                        depth=depth,
+                        breadth=breadth,
+                        temperature=0.3,
+                    )
+
+                # 5.4 Mostrar árbol y JSON
+                st.plotly_chart(to_plotly_tree(tree), use_container_width=True)
+                with st.expander("JSON completo"):
+                    st.json(tree)
+
+                # 5.5 Cálculo y visualización del EEE
+                from epistemic_metrics import compute_eee
+                eee_score = compute_eee(tree, depth_limit=depth, breadth_limit=breadth)
+                st.metric(label="Índice de Equilibrio Erotético (EEE)", value=eee_score)
+
+                # 5.6 Exportaciones CSV y HTML
+                # A) Aplanar el árbol para CSV
+                def _flatten_tree(tree: dict, parent: str = "") -> list[tuple[str, str]]:
+                    rows = []
+                    for q, kids in tree.items():
+                        rows.append((q, parent))
+                        if isinstance(kids, dict):
+                            rows.extend(_flatten_tree(kids, q))
+                    return rows
+
+                flat = _flatten_tree(tree)
+                df_tree = pd.DataFrame(flat, columns=["question", "parent"])
+                csv_tree = df_tree.to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    label="📥 Descargar árbol (CSV)",
+                    data=csv_tree,
+                    file_name="inquiry_tree.csv",
+                    mime="text/csv",
                 )
 
-            # 5.4 Mostrar árbol y JSON
-            st.plotly_chart(to_plotly_tree(tree), use_container_width=True)
-            with st.expander("JSON completo"):
-                st.json(tree)
+                # B) CSV con metadatos EEE
+                eee_meta = {
+                    "DMU": dmu,
+                    "model": model,
+                    "orientation": orientation,
+                    "super_eff": super_eff,
+                    "depth": depth,
+                    "breadth": breadth,
+                    "EEE_score": eee_score,
+                }
+                df_eee = pd.DataFrame.from_records([eee_meta])
+                csv_eee = df_eee.to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    label="📥 Descargar EEE (CSV)",
+                    data=csv_eee,
+                    file_name="eee_meta.csv",
+                    mime="text/csv",
+                )
 
-            # 5.5 Cálculo y visualización del EEE
-            from epistemic_metrics import compute_eee
-            eee_score = compute_eee(tree, depth_limit=depth, breadth_limit=breadth)
-            st.metric(label="Índice de Equilibrio Erotético (EEE)", value=eee_score)
-
-            # 5.6 Exportaciones CSV y HTML
-            # A) Aplanar el árbol para CSV
-            def _flatten_tree(tree: dict, parent: str = "") -> list[tuple[str, str]]:
-                rows = []
-                for q, kids in tree.items():
-                    rows.append((q, parent))
-                    if isinstance(kids, dict):
-                        rows.extend(_flatten_tree(kids, q))
-                return rows
-
-            flat = _flatten_tree(tree)
-            df_tree = pd.DataFrame(flat, columns=["question", "parent"])
-            csv_tree = df_tree.to_csv(index=False).encode("utf-8")
-            st.download_button(
-                label="📥 Descargar árbol (CSV)",
-                data=csv_tree,
-                file_name="inquiry_tree.csv",
-                mime="text/csv",
-            )
-
-            # B) CSV con metadatos EEE
-            eee_meta = {
-                "DMU": dmu,
-                "model": model,
-                "orientation": orientation,
-                "super_eff": super_eff,
-                "depth": depth,
-                "breadth": breadth,
-                "EEE_score": eee_score,
-            }
-            df_eee = pd.DataFrame.from_records([eee_meta])
-            csv_eee = df_eee.to_csv(index=False).encode("utf-8")
-            st.download_button(
-                label="📥 Descargar EEE (CSV)",
-                data=csv_eee,
-                file_name="eee_meta.csv",
-                mime="text/csv",
-            )
-
-            # C) Reporte HTML completo
-            from report_generator import generate_html_report
-            html_report = generate_html_report(
-                df_dea=dea_df, df_tree=df_tree, df_eee=df_eee
-            )
-            html_bytes = html_report.encode("utf-8")
-            st.download_button(
-                label="📥 Descargar reporte completo (HTML)",
-                data=html_bytes,
-                file_name="reporte_dea_deliberativo.html",
-                mime="text/html",
-            )
+                # C) Reporte HTML completo
+                from report_generator import generate_html_report
+                html_report = generate_html_report(
+                    df_dea=dea_df, df_tree=df_tree, df_eee=df_eee
+                )
+                html_bytes = html_report.encode("utf-8")
+                st.download_button(
+                    label="📥 Descargar reporte completo (HTML)",
+                    data=html_bytes,
+                    file_name="reporte_dea_deliberativo.html",
+                    mime="text/html",
+                )
