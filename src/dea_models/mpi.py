@@ -2,6 +2,7 @@
 
 import numpy as np
 import pandas as pd
+import cvxpy as cp
 
 from .radial import _dea_core  # usamos el núcleo DEA radial
 from .utils import validate_positive_dataframe
@@ -20,14 +21,16 @@ def compute_malmquist_phi(
     period_column: nombre de la columna de período (ej. 'year').
     input_cols, output_cols: listas de columnas.
     Retorna DataFrame con columnas:
-      DMU, period_t, period_t+1, MPI, Efficiency_t, Efficiency_t_plus1, 技change (catch-up), frontier_shift
+      DMU, period_t, period_t1, MPI, Efficiency_t, Efficiency_t1, catch_up, frontier_shift
     """
-    # 1) Validar positividad en todos los datos
-    cols = input_cols + output_cols + [period_column, dmu_column]
-    # Extraemos subset numérico
-    df_num = df_panel.copy()
-    # Verificar que inputs/outputs sean numéricos y >0
-    validate_positive_dataframe(df_num, input_cols + output_cols)
+    # Verificar que existan las columnas DMU y período
+    if dmu_column not in df_panel.columns:
+        raise ValueError(f"La columna DMU '{dmu_column}' no existe en el DataFrame.")
+    if period_column not in df_panel.columns:
+        raise ValueError(f"La columna de periodo '{period_column}' no existe en el DataFrame.")
+
+    # 1) Validar positividad en todos los datos de inputs/outputs
+    validate_positive_dataframe(df_panel, input_cols, output_cols)
 
     # 2) Obtener lista ordenada de períodos
     periods = sorted(df_panel[period_column].unique())
@@ -38,7 +41,7 @@ def compute_malmquist_phi(
     dmus = df_panel[dmu_column].astype(str).unique().tolist()
 
     # 3) Para cada DMU, calcular índices en cada par (t, t+1)
-    for i, dmu in enumerate(dmus):
+    for dmu in dmus:
         df_dmu = df_panel[df_panel[dmu_column] == dmu]
         for idx in range(len(periods) - 1):
             t = periods[idx]
@@ -57,18 +60,17 @@ def compute_malmquist_phi(
             X_t1 = df_t1[input_cols].to_numpy().T
             Y_t1 = df_t1[output_cols].to_numpy().T
 
-            # Indices de DMU en cada panel
+            # Índices de DMU en cada panel
             idx_t = df_t.index[df_t[dmu_column] == dmu][0]
             idx_t1 = df_t1.index[df_t1[dmu_column] == dmu][0]
 
             # 4) Eficiencia de DMU(t) con frontera t y t+1
-            eff_t_t = _run_dea_core_panel(X_t, Y_t, idx_t, rts)      # efficiency en periodo t usando frontera t
-            eff_t1_t = _run_dea_core_panel(X_t1, Y_t1, idx_t1, rts)  # efficiency en periodo t+1 usando frontera t
-            eff_t_t1 = _run_dea_core_panel(X_t, Y_t, idx_t, rts)     # efficiency en periodo t usando frontera t+1
-            eff_t1_t1 = _run_dea_core_panel(X_t1, Y_t1, idx_t1, rts) # efficiency en periodo t+1 usando frontera t+1
+            eff_t_t = _run_dea_core_panel(X_t, Y_t, idx_t, rts)
+            eff_t1_t = _run_dea_core_panel(X_t1, Y_t1, idx_t1, rts)
+            eff_t_t1 = _run_dea_core_panel(X_t, Y_t, idx_t, rts)      # frontera t usada en t+1
+            eff_t1_t1 = _run_dea_core_panel(X_t1, Y_t1, idx_t1, rts)  # frontera t+1
 
             # 5) Calcular índice Malmquist
-            # MPI = sqrt((eff_t1_t / eff_t_t) * (eff_t1_t1 / eff_t_t1))
             try:
                 mpi_val = np.sqrt((eff_t1_t / eff_t_t) * (eff_t1_t1 / eff_t_t1))
             except:
@@ -110,7 +112,6 @@ def _run_dea_core_panel(
     lambdas = cp.Variable((n, 1), nonneg=True)
     theta = cp.Variable()
 
-    # Restricciones
     cons = []
     cons.append(Y @ lambdas >= Y[:, [idx]])
     cons.append(X @ lambdas <= theta * X[:, [idx]])
