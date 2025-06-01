@@ -117,6 +117,9 @@ def run_radial_distance(
     Retorna DataFrame con columnas:
       DMU, distance_score, lambda_vector, slacks_inputs, slacks_outputs.
     """
+    if dmu_column not in df.columns:
+        raise ValueError(f"La columna DMU '{dmu_column}' no existe en el DataFrame.")
+
     # 1) Validación (permitimos zeros/negativos en RD)
     cols = input_cols + output_cols
     # Validar solo conversión a float; permitimos ≤0
