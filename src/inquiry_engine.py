@@ -22,17 +22,11 @@ def to_plotly_tree(tree: dict):
 # ---------- Function-Calling ----------
 FUNCTION_SPEC = {
     "name": "return_tree",
-    "description": "Devuelve un árbol de subpreguntas anidadas (clave = pregunta, valor = subárbol).",
+    "description": "Devuelve un árbol de subpreguntas DEA.",
     "parameters": {
         "type": "object",
-        "properties": {
-            "tree": {
-                "type": "object",
-                "description": "Nodo raíz con subnodos arbitrarios.",
-                "additionalProperties": {"type": "object"},
-            }
-        },
-        "required": ["tree"],
+        "properties": {},            # sin validación: acepta cualquier clave
+        "additionalProperties": True
     },
 }
 
