@@ -25,7 +25,7 @@ FUNCTION_SPEC = {
     },
 }
 
-# ---- util para Plotly ----
+# ---- util Plotly ----
 def to_plotly_tree(tree: Dict[str, Any]):
     labels, parents = [], []
 
@@ -82,8 +82,9 @@ def generate_inquiry(
         except json.JSONDecodeError:
             pass
 
-    # b) intentamos parsear texto (JSON plain)
-    raw = resp.choices[0].message.content.strip()
+    # b) intentamos parsear texto (JSON plano)
+    raw_content = resp.choices[0].message.content
+    raw = (raw_content or "").strip()           # <-- protege cuando es None
     try:
         tree = json.loads(raw)
         if _tree_is_valid(tree):
@@ -99,9 +100,10 @@ def _tree_is_valid(tree: Dict[str, Any]) -> bool:
     if not tree:
         return False
     first_key = next(iter(tree))
-    # árbol válido si no es placeholder y tiene al menos 2 subnodos o un subnivel
+    # Árbol válido si no es placeholder y hay ≥2 subnodos o subniveles
     return not ("ℹ️" in tree.get(first_key, {})) and (
-        len(tree[first_key]) >= 2 or any(isinstance(v, dict) for v in tree[first_key].values())
+        len(tree[first_key]) >= 2
+        or any(isinstance(v, dict) for v in tree[first_key].values())
     )
 
 def _fallback_tree(root_q: str) -> Dict[str, Any]:
