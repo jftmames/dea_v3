@@ -42,19 +42,21 @@ if upload:
     # 3. Ejecutar DEA
     # ------------------------------------------------------------------
         
-    if st.button("Ejecutar DEA (CCR input)"):
+if st.button("Ejecutar DEA (CCR input)"):
+    with st.spinner("Optimizando…"):
         try:
             res = run_dea(df, inputs, outputs, model="CCR")
-        except ValueError as e:         # conversión a float o NaN en columnas
+            if res["efficiency"].isna().all():
+                st.error("⚠️ El solver no devolvió soluciones válidas.")
+                st.stop()
+        except (ValueError, KeyError) as e:
             st.error(f"❌ {e}")
             st.stop()
-        except KeyError as e:           # nombre de columna no existe
-            st.error(f"🔑 Columna no encontrada: {e}")
-            st.stop()
-        else:
-            st.session_state["res_df"] = res
-            st.subheader("Eficiencias")
-            st.dataframe(res, use_container_width=True)
+
+    st.session_state["res_df"] = res
+    st.subheader("Eficiencias CCR")
+    st.dataframe(res, use_container_width=True)
+
 
 # ------------------------------------------------------------------
 # 4. Complejos de Indagación
