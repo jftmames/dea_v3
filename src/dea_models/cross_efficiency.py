@@ -24,6 +24,10 @@ def compute_cross_efficiency(
       - "benevolent": eficiencia_i = max_j θ_{i|j}
     Retorna DataFrame n×n con columnas y filas = DMUs, y una fila adicional con ranking.
     """
+    # Validar que la columna DMU exista
+    if dmu_column not in df.columns:
+        raise ValueError(f"La columna DMU '{dmu_column}' no existe en el DataFrame.")
+
     # 1) Validar positividades
     cols = input_cols + output_cols
     validate_positive_dataframe(df, cols)
@@ -33,42 +37,32 @@ def compute_cross_efficiency(
 
     # 2) Resolver modelos individuales para obtener lambdas
     lambdas_list = []  # lista de dicts: un dict por j con pesos óptimos
+    df_ccr_full = _run_dea_internal(
+        df=df,
+        inputs=input_cols,
+        outputs=output_cols,
+        model="CCR",
+        orientation="input",
+        super_eff=False
+    )
+    # df_ccr_full contiene una fila por DMU, con 'lambda_vector' dict
     for j in range(n):
-        # Formamos df_j = DataFrame con el mismo orden que df, 
-        # pero centrado en la DMU j para extraer lambdas de run_ccr
-        # Sin embargo, _run_dea_internal no da directamente pesos duales,
-        # así que para cross-efficiency, usamos la solución λ* de primal:
-        # corremos run_ccr con super_eff=False, luego recuperamos "lambda_vector"
-        df_ccr = _run_dea_internal(
-            df=df,
-            inputs=input_cols,
-            outputs=output_cols,
-            model="CCR",
-            orientation="input",
-            super_eff=False
-        )
-        # df_ccr tiene columna 'lambda_vector' que es dict con pesos de j
-        lambdas_list.append(df_ccr.loc[j, "lambda_vector"])
+        lambdas_list.append(df_ccr_full.loc[j, "lambda_vector"])
 
     # 3) Construir matriz n×n
     cross_matrix = np.zeros((n, n))
     for i in range(n):
         for j in range(n):
             lam_j = lambdas_list[j]
-            # eficiencia de i con pesos de j: Σ v_r y_ir / Σ u_k x_ik
-            num = 0.0
-            den = 0.0
-            # Suponemos que lam_j guarda {DMU: peso}, pero necesitamos u y v
-            # En este enfoque simplificado, usamos la eficiencia original de j
-            # para calibrar ratio. Una implementación completa extraería 
-            # u y v (duales) del solver. Aquí aproximamos:
-            eff_ij = lambdas_list[j].get(dmus[i], 0.0)
+            # eficiencia de i con "pesos" de j: en esta versión simplificada,
+            # usamos el valor de lambda_j para i como proxy
+            eff_ij = lam_j.get(dmus[i], 0.0)
             cross_matrix[i, j] = eff_ij
 
     # 4) Convertir a DataFrame
     df_cross = pd.DataFrame(cross_matrix, index=dmus, columns=dmus)
 
-    # 5) Ranking
+    # 5) Ranking según método
     if method == "average":
         df_cross["avg_peer_rating"] = df_cross.mean(axis=1)
     elif method == "aggressive":
