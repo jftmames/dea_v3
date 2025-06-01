@@ -201,4 +201,15 @@ st.download_button(
     file_name="eee_meta.csv",
     mime="text/csv",
 )
+# --- 6.2 botón para descargar reporte completo en HTML ---
+from report_generator import generate_html_report
+
+html_report = generate_html_report(df_dea=st.session_state["res_df"], df_tree=df_tree, df_eee=df_eee)
+html_bytes = html_report.encode("utf-8")
+st.download_button(
+    label="📥 Descargar reporte completo (HTML)",
+    data=html_bytes,
+    file_name="reporte_dea_deliberativo.html",
+    mime="text/html",
+)
 
