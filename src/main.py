@@ -10,6 +10,7 @@ from results import (
     plot_3d_inputs_outputs,
     plot_benchmark_spider,
 )
+from openai_helpers import explain_orientation, recommend_alternatives
 
 
 # ---------- util: obtener la fila de la DMU ----------
