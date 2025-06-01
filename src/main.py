@@ -44,11 +44,12 @@ if upload:
     if st.button("Ejecutar DEA (CCR input)"):
         try:
             res = run_dea(df, inputs, outputs, model="CCR")
-            st.session_state["res_df"] = res  # guardar para otros pasos
+        except ValueError as e:
+            st.error(f"❌ {e}")
+        else:
+            st.session_state["res_df"] = res
             st.subheader("Eficiencias")
             st.dataframe(res, use_container_width=True)
-        except ValueError as e:
-            st.error(f"Error al ejecutar DEA: {e}")
 
 else:
     st.write("📄 Carga un CSV para comenzar.")
