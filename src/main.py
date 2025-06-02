@@ -12,17 +12,16 @@ from session_manager import init_db, save_session, load_sessions
 # -------------------------------------------------------
 # 0) Configuración inicial de Streamlit
 # -------------------------------------------------------
-st.set_page_config(layout="wide")  # Usa ancho completo para que el sidebar permanezca visible
+st.set_page_config(layout="wide")
 
 # -------------------------------------------------------
 # 1) Inicialización de la base de datos de sesiones
 # -------------------------------------------------------
 init_db()
-default_user_id = "user_1"  # Identificador estático; ajústalo según tu lógica
+default_user_id = "user_1"
 
 # -------------------------------------------------------
 # 2) Sidebar: cargar sesiones previas
-#    (Siempre se dibuja, no dentro de if uploaded_file)
 # -------------------------------------------------------
 st.sidebar.header("Simulador DEA - Sesiones Guardadas")
 
@@ -54,7 +53,7 @@ st.sidebar.markdown("---")
 # -------------------------------------------------------
 st.title("Simulador Econométrico-Deliberativo – DEA")
 
-# Inicializar en session_state las variables necesarias
+# Inicializamos en session_state los valores que necesitaremos
 if "df" not in st.session_state:
     st.session_state.df = None
 if "dmu_col" not in st.session_state:
@@ -65,8 +64,13 @@ if "output_cols" not in st.session_state:
     st.session_state.output_cols = []
 if "dea_results" not in st.session_state:
     st.session_state.dea_results = None
-if "selected_dmu" not in st.session_state:
-    st.session_state.selected_dmu = None
+
+# --- NUEVO: Añadimos dos objetos en session_state para árbol y EEE ---
+if "df_tree" not in st.session_state:
+    st.session_state.df_tree = None
+if "df_eee" not in st.session_state:
+    st.session_state.df_eee = None
+# -------------------------------------------------------------------
 
 uploaded_file = st.file_uploader("Cargar archivo CSV (con DMUs)", type=["csv"])
 
@@ -122,14 +126,28 @@ if st.session_state.df is not None:
                 for issue in errors["llm"]["issues"]:
                     st.write(f"  • {issue}")
         else:
-            with st.spinner("Calculando eficiencias…"):
+            with st.spinner("Calculando eficiencias y generando árbol/EEE…"):
+                # Ejecutar la función que retorna no solo DEA, sino también árbol y métricas EEE
                 resultados = mostrar_resultados(
                     df.copy(),
                     st.session_state.dmu_col,
                     st.session_state.input_cols,
                     st.session_state.output_cols
                 )
+                # mostrar_resultados (o tu función equivalente) debería devolver un dict con:
+                # {
+                #   "df_ccr": DataFrame,
+                #   "df_bcc": DataFrame,
+                #   "hist_ccr": fig,
+                #   "hist_bcc": fig,
+                #   "scatter3d_ccr": fig,
+                #   "df_tree": DataFrame_del_arbol,      <--- NUEVO
+                #   "df_eee": DataFrame_métricas_EEE      <--- NUEVO
+                # }
             st.session_state.dea_results = resultados
+            # Guardar también en session_state los DataFrames de árbol y EEE
+            st.session_state.df_tree = resultados.get("df_tree", pd.DataFrame())
+            st.session_state.df_eee = resultados.get("df_eee", pd.DataFrame())
 
     # -------------------------------------------------------
     # 6) Mostrar resultados si ya se calcularon
@@ -159,6 +177,9 @@ if st.session_state.df is not None:
         # -------------------------------------------------------
         st.subheader("Benchmark Spider CCR")
         dmu_options = df_ccr["DMU"].astype(str).tolist()
+        if "selected_dmu" not in st.session_state:
+            st.session_state.selected_dmu = dmu_options[0] if dmu_options else None
+
         st.session_state.selected_dmu = st.selectbox(
             "Seleccionar DMU para comparar contra peers eficientes",
             dmu_options,
@@ -176,7 +197,25 @@ if st.session_state.df is not None:
             st.plotly_chart(spider_fig, use_container_width=True)
 
         # -------------------------------------------------------
-        # 8) Guardar sesión
+        # 8) Mostrar el "Complejo de indagación" (df_tree)
+        # -------------------------------------------------------
+        st.subheader("Complejo de Indagación (Árbol)")
+        if not st.session_state.df_tree.empty:
+            st.dataframe(st.session_state.df_tree)
+        else:
+            st.write("No hay datos del árbol de indagación para mostrar.")
+
+        # -------------------------------------------------------
+        # 9) Mostrar métricas EEE
+        # -------------------------------------------------------
+        st.subheader("Métricas EEE")
+        if not st.session_state.df_eee.empty:
+            st.dataframe(st.session_state.df_eee)
+        else:
+            st.write("No hay métricas EEE para mostrar.")
+
+        # -------------------------------------------------------
+        # 10) Guardar sesión
         # -------------------------------------------------------
         st.subheader("Guardar esta sesión")
         inquiry_tree = sess.get("inquiry_tree", {}) if selected_session_id else {}
@@ -196,15 +235,15 @@ if st.session_state.df is not None:
             st.success("Sesión guardada correctamente.")
 
         # -------------------------------------------------------
-        # 9) Generar reportes
+        # 11) Generar reportes
         # -------------------------------------------------------
         st.subheader("Generar reportes")
 
-        # 9.1) Reporte HTML
+        # 11.1) Reporte HTML
         html_str = generate_html_report(
             df_dea=df_ccr,
-            df_tree=pd.DataFrame(),   # Placeholder: tu DataFrame de árbol si lo tienes
-            df_eee=pd.DataFrame()     # Placeholder: tu DataFrame de EEE si lo tienes
+            df_tree=st.session_state.df_tree,
+            df_eee=st.session_state.df_eee
         )
         st.download_button(
             label="Descargar Reporte HTML",
@@ -213,11 +252,11 @@ if st.session_state.df is not None:
             mime="text/html"
         )
 
-        # 9.2) Reporte Excel
+        # 11.2) Reporte Excel
         excel_io = generate_excel_report(
             df_dea=df_ccr,
-            df_tree=pd.DataFrame(),
-            df_eee=pd.DataFrame()
+            df_tree=st.session_state.df_tree,
+            df_eee=st.session_state.df_eee
         )
         st.download_button(
             label="Descargar Reporte Excel",
