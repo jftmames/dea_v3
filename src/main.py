@@ -15,10 +15,10 @@ from session_manager import init_db, save_session, load_sessions
 st.set_page_config(layout="wide")
 
 # -------------------------------------------------------
-# 1) Inicialización de la base de datos de sesiones
+# 1) Inicializar base de datos de sesiones
 # -------------------------------------------------------
 init_db()
-default_user_id = "user_1"  # Identificador estático; ajústalo según tu lógica
+default_user_id = "user_1"
 
 # -------------------------------------------------------
 # 2) Sidebar: cargar sesiones previas
@@ -78,7 +78,7 @@ if uploaded_file is not None:
     st.session_state.df = pd.read_csv(uploaded_file)
 
 # -------------------------------------------------------
-# 5) Si ya hay un DataFrame cargado, avanzar con selección
+# 5) Si ya hay DataFrame cargado, avanzar con selección
 # -------------------------------------------------------
 if st.session_state.df is not None:
     df = st.session_state.df.copy()
@@ -99,9 +99,7 @@ if st.session_state.df is not None:
 
     # 6.2) Multiselect para inputs
     candidate_inputs = [c for c in all_columns if c != st.session_state.dmu_col]
-    valid_input_defaults = [
-        col for col in st.session_state.input_cols if col in candidate_inputs
-    ]
+    valid_input_defaults = [col for col in st.session_state.input_cols if col in candidate_inputs]
     st.session_state.input_cols = st.multiselect(
         "Seleccionar columnas de inputs",
         options=candidate_inputs,
@@ -109,13 +107,8 @@ if st.session_state.df is not None:
     )
 
     # 6.3) Multiselect para outputs
-    candidate_outputs = [
-        c for c in all_columns
-        if c not in st.session_state.input_cols + [st.session_state.dmu_col]
-    ]
-    valid_output_defaults = [
-        col for col in st.session_state.output_cols if col in candidate_outputs
-    ]
+    candidate_outputs = [c for c in all_columns if c not in st.session_state.input_cols + [st.session_state.dmu_col]]
+    valid_output_defaults = [col for col in st.session_state.output_cols if col in candidate_outputs]
     st.session_state.output_cols = st.multiselect(
         "Seleccionar columnas de outputs",
         options=candidate_outputs,
@@ -175,13 +168,12 @@ if st.session_state.df is not None:
         st.plotly_chart(resultados["scatter3d_ccr"], use_container_width=True)
 
         # -------------------------------------------------------
-        # 9) Benchmark Spider CCR
+        # 9) Benchmark Spider CCR (uso dinámico de la columna DMU)
         # -------------------------------------------------------
         st.subheader("Benchmark Spider CCR")
         dmu_col = st.session_state.dmu_col
         dmu_options = df_ccr[dmu_col].astype(str).tolist()
 
-        # Limpiar default de selected_dmu si ya no existe
         if st.session_state.selected_dmu not in dmu_options:
             st.session_state.selected_dmu = dmu_options[0] if dmu_options else None
 
@@ -244,7 +236,7 @@ if st.session_state.df is not None:
         # -------------------------------------------------------
         st.subheader("Generar reportes")
 
-        # 13.1) Reporte HTML
+        # Reporte HTML
         html_str = generate_html_report(
             df_dea=df_ccr,
             df_tree=st.session_state.df_tree,
@@ -257,7 +249,7 @@ if st.session_state.df is not None:
             mime="text/html"
         )
 
-        # 13.2) Reporte Excel
+        # Reporte Excel
         excel_io = generate_excel_report(
             df_dea=df_ccr,
             df_tree=st.session_state.df_tree,
