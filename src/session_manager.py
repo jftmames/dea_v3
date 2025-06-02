@@ -78,13 +78,18 @@ def save_session(
 
 def load_sessions(user_id: str) -> list[dict]:
     """
-    Recupera todas las sesiones de un usuario dado.
-    Retorna lista de dicts con keys: session_id, timestamp, inquiry_tree, eee_score, notes, dmu_column, input_cols, output_cols, df_ccr, df_bcc.
+    Recupera sesiones de un usuario dado con información básica.
+    Retorna lista de dicts con keys: session_id, timestamp, inquiry_tree, eee_score, notes.
     """
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     cur.execute("""
-        SELECT session_id, timestamp, inquiry_tree, eee_score, notes, dmu_column, input_cols, output_cols, df_ccr, df_bcc
+        SELECT 
+            session_id,
+            timestamp,
+            inquiry_tree,
+            eee_score,
+            notes
         FROM inquiry_sessions
         WHERE user_id = ?
     """, (user_id,))
@@ -93,23 +98,15 @@ def load_sessions(user_id: str) -> list[dict]:
 
     sesiones = []
     for row in rows:
-        # Deserializar los campos JSON
+        # Deserializar inquiry_tree
         inquiry_tree_data = json.loads(row[2]) if row[2] else {}
-        dea_inputs_data = json.loads(row[6]) if row[6] else []
-        dea_outputs_data = json.loads(row[7]) if row[7] else []
-        df_ccr_data = pd.read_json(row[8], orient='records') if row[8] else pd.DataFrame()
-        df_bcc_data = pd.read_json(row[9], orient='records') if row[9] else pd.DataFrame()
-
+        
         sesiones.append({
             "session_id": row[0],
             "timestamp": row[1],
             "inquiry_tree": inquiry_tree_data,
             "eee_score": row[3],
             "notes": row[4],
-            "dmu_column": row[5], # dmu_column no era JSON
-            "input_cols": dea_inputs_data,
-            "output_cols": dea_outputs_data,
-            "df_ccr": df_ccr_data,
-            "df_bcc": df_bcc_data
+            # Las columnas de DEA no se cargan aquí según la solicitud
         })
     return sesiones
