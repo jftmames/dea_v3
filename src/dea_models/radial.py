@@ -245,7 +245,7 @@ def run_ccr(
                 "slacks_outputs": {col: np.nan for col in output_cols}, "rts_label": "CRS"
             })
             continue
-           
+            
         eff_val_rad = theta_rad.value if orientation == "input" else phi_rad.value
         if eff_val_rad is None: eff_val_rad = np.nan
 
@@ -269,16 +269,16 @@ def run_ccr(
             # Target outputs are eff_val_rad * y0. Inputs are x0.
              cons_stage2 = [X_ref @ lambdas_var + slacks_in_var == x0,
                            Y_ref @ lambdas_var - slacks_out_var == eff_val_rad * y0]
-           
+            
         # Objective for stage 2: Maximize sum of slacks
         # Using a common approach: sum of normalized slacks, or simply sum of slacks.
         # For simplicity, we can just solve the system of equations if lambdas are fixed.
         # If lambdas are variable in stage 2, then Maximize cp.sum(slacks_in_var) + cp.sum(slacks_out_var)
-           
+            
         # Here, the provided code structure defines slacks_in, slacks_out as variables in a single problem.
         # Let's stick to the original structure of run_ccr which seems to be a single stage model
         # defining theta and slacks together for input orientation.
-           
+            
         # Reverting to a single-stage model for CCR that includes slacks, as per original structure
         # This is an "enhanced" CCR model, not strictly two-stage as often described,
         # but solves for theta and slacks simultaneously.
@@ -313,7 +313,7 @@ def run_ccr(
         else: # output
             slacks_input_values = x0 - (X_ref @ lambdas_opt)
             slacks_output_values = (eff_val_rad * y0) - (Y_ref @ lambdas_opt)
-           
+            
         # Ensure slacks are non-negative (due to numerical precision, they might be slightly negative)
         slacks_input_values[slacks_input_values < 0] = 0
         slacks_output_values[slacks_output_values < 0] = 0
@@ -323,7 +323,7 @@ def run_ccr(
         if lambdas_opt is not None:
             for idx, ref_idx in enumerate(ref_dmus_indices):
                 lambdas_vals[dmus[ref_idx]] = float(lambdas_opt[idx, 0])
-           
+            
         slacks_input_dict = {input_cols[k]: float(slacks_input_values[k,0]) for k in range(m)}
         slacks_output_dict = {output_cols[r]: float(slacks_output_values[r,0]) for r in range(s)}
 
@@ -351,85 +351,104 @@ def run_bcc(
     super_eff: bool = False,
 ) -> pd.DataFrame:
     """
-    Ejecuta modelo BCC (VRS) con orientación input u output.
-    Retorna DataFrame con columnas:
+    Ejecuta modelo BCC (VRS) con orientación 'input' u 'output'.
+    Retorna un DataFrame con columnas:
       DMU, efficiency, model, orientation, super_eff, slacks_inputs, slacks_outputs
     """
-    # 1) Validar existencia de dmu_column
+    # 1) Validar que exista la columna DMU
     if dmu_column not in df.columns:
         raise ValueError(f"La columna DMU '{dmu_column}' no existe en el DataFrame.")
 
-    # 2) Validar inputs/outputs positivos
+    # 2) Validar que los inputs/outputs sean numéricos y > 0
     validate_dataframe(df, input_cols, output_cols, allow_zero=False, allow_negative=False)
 
-    # 3) Preparar matrices X (inputs) y Y (outputs)
+    # 3) Preparar X (inputs) y Y (outputs)
     df_num = df[[dmu_column] + input_cols + output_cols].copy()
-    # Extraer datos numéricos y convertir a matriz
-    X = df_num[input_cols].to_numpy().T    # forma m×n
-    Y = df_num[output_cols].to_numpy().T  # forma s×n
+    X = df_num[input_cols].to_numpy().T    # m × n
+    Y = df_num[output_cols].to_numpy().T  # s × n
     dmus = df_num[dmu_column].astype(str).tolist()
-    m, n = X.shape    # m = número de inputs, n = número de DMUs
-    s, _ = Y.shape    # s = número de outputs
+    m, n = X.shape    # m = #inputs, n = #DMUs
+    s, _ = Y.shape    # s = #outputs
 
-    # 4) Vector para almacenar eficiencias y lista de registros
+    # 4) Crear vectores para guardar resultados
     eff = np.zeros(n)
     registros = [None] * n
 
-    # 5) Para cada DMU i, resolver el problema BCC
+    # 5) Iterar sobre cada DMU i
     for i in range(n):
-        # 5.1) Construcción de X_mat, Y_mat excluyendo i si super_eff=True
+        # 5.1) Preparar la muestra (excluir la DMU i si super_eff=True)
         if super_eff:
             mask = np.ones(n, dtype=bool)
             mask[i] = False
-            X_mat = X[:, mask]
-            Y_mat = Y[:, mask]
-            # dmus_mat = [dmus[j] for j in range(n) if j != i] # Not used for lambda_vector as it's built from ref_dmus_indices
+            X_ref = X[:, mask]    # inputs de todas menos la i‐ésima
+            Y_ref = Y[:, mask]    # outputs de todas menos la i‐ésima
+            # dmus_ref = [dmus[j] for j in range(n) if j != i] # Se usa ref_dmus_indices
             num_vars = n - 1
+            if num_vars == 0: # Cannot run super-efficiency with 1 DMU
+                # Manejar el caso de una única DMU con super_eff=True
+                registros[i] = {
+                    dmu_column: dmus[i],
+                    "efficiency": 1.0 if orientation == "input" else 1.0,
+                    "model": "BCC",
+                    "orientation": orientation,
+                    "super_eff": bool(super_eff),
+                    "lambda_vector": {dmus[i]: 1.0},
+                    "slacks_inputs": {col: 0.0 for col in input_cols},
+                    "slacks_outputs": {col: 0.0 for col in output_cols},
+                    "scale_efficiency": 1.0,
+                    "rts_label": "VRS" # Default for BCC
+                }
+                continue
             ref_dmus_indices = [idx for idx, val in enumerate(mask) if val]
         else:
-            X_mat = X
-            Y_mat = Y
-            # dmus_mat = dmus # Not used
+            X_ref = X
+            Y_ref = Y
+            # dmus_ref = dmus # Se usa ref_dmus_indices
             num_vars = n
             ref_dmus_indices = list(range(n))
 
-        # 5.2) Variables de lambda y phi/theta
-        lambdas = cp.Variable((num_vars, 1), nonneg=True)
-        if orientation == "input":
-            phi = cp.Variable()
-        else:
-            theta = cp.Variable()
-
-        # 5.3) Variables de slack (siempre las definimos)
+        # 5.2) Definir variables de decisión
+        lambdas_var = cp.Variable((num_vars, 1), nonneg=True)
         slacks_in = cp.Variable((m, 1), nonneg=True)
         slacks_out = cp.Variable((s, 1), nonneg=True)
 
-        # 5.4) Restricciones según orientación
-        constraints = []
+        # Declarar placeholder para theta y phi
+        theta = None
+        phi = None
+
+        # 5.3) Construir restricciones y objetivo según orientación
+        constraints: list = []
+        # Obtener los inputs y outputs de la DMU actual
+        x_i = X[:, [i]]
+        y_i = Y[:, [i]]
+
         if orientation == "input":
-            # Input-oriented BCC (standard formulation: minimize theta)
-            # Yλ + s_out = Y[i]
-            # Xλ - s_in = theta * X[i]
-            # Σλ = 1
+            # Input-oriented BCC: min θ tal que
+            #   Y_ref @ λ - slacks_out == Y[i]      (outputs logrados)
+            #   X_ref @ λ + slacks_in == θ * X[i]  (inputs usados con factor de contracción)
+            #   Σ λ == 1
+            theta = cp.Variable()
             constraints += [
-                Y_mat @ lambdas - slacks_out == Y[:, [i]],
-                X_mat @ lambdas + slacks_in == theta * X[:, [i]],
-                cp.sum(lambdas) == 1
+                Y_ref @ lambdas_var - slacks_out == y_i,
+                X_ref @ lambdas_var + slacks_in == theta * x_i,
+                cp.sum(lambdas_var) == 1
             ]
             objective = cp.Minimize(theta)
-        else:
-            # Output-oriented BCC (standard formulation: maximize phi)
-            # Yλ + s_out = phi * Y[i]
-            # Xλ - s_in = X[i]
-            # Σλ = 1
+
+        else: # orientation == "output"
+            # Output-oriented BCC: max φ tal que
+            #   Y_ref @ λ - slacks_out == φ * Y[i]  (outputs expandidos con factor de expansión)
+            #   X_ref @ λ + slacks_in == X[i]       (inputs usados)
+            #   Σ λ == 1
+            phi = cp.Variable()
             constraints += [
-                Y_mat @ lambdas - slacks_out == phi * Y[:, [i]],
-                X_mat @ lambdas + slacks_in == X[:, [i]],
-                cp.sum(lambdas) == 1
+                Y_ref @ lambdas_var - slacks_out == phi * y_i,
+                X_ref @ lambdas_var + slacks_in == x_i,
+                cp.sum(lambdas_var) == 1
             ]
             objective = cp.Maximize(phi)
 
-        # 5.5) Resolver el problema
+        # 5.4) Resolver el problema
         prob = cp.Problem(objective, constraints)
         prob.solve(
             solver=cp.ECOS,
@@ -439,44 +458,43 @@ def run_bcc(
             verbose=False
         )
 
-        # 6) Extraer eficiencia
+        # 6) Extraer la eficiencia (theta o phi)
         current_eff_val = np.nan
         if prob.status in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE]:
             if orientation == "input":
                 theta_val = theta.value
                 current_eff_val = float(theta_val) if theta_val is not None else np.nan
-            else:
+            else: # output orientation
                 phi_val = phi.value
                 current_eff_val = float(phi_val) if phi_val is not None else np.nan
         eff[i] = current_eff_val
 
-        # 7) Extraer slacks, comprobando None
+        # 7) Extraer slacks (comprobando None y ajustando por precisión numérica)
         if slacks_in.value is None:
             slack_in_arr = np.zeros((m, 1))
         else:
             slack_in_arr = slacks_in.value
-            slack_in_arr[slack_in_arr < 1e-9] = 0 # Numerical precision for slacks
+            slack_in_arr[slack_in_arr < 1e-9] = 0 # Ajuste por precisión
 
         if slacks_out.value is None:
             slack_out_arr = np.zeros((s, 1))
         else:
             slack_out_arr = slacks_out.value
-            slack_out_arr[slack_out_arr < 1e-9] = 0 # Numerical precision for slacks
+            slack_out_arr[slack_out_arr < 1e-9] = 0 # Ajuste por precisión
 
         slacks_input = {input_cols[k]: float(slack_in_arr[k, 0]) for k in range(m)}
         slacks_output = {output_cols[r]: float(slack_out_arr[r, 0]) for r in range(s)}
-           
+            
         # Lambda values
         lambdas_vals = {}
-        if lambdas.value is not None:
+        if lambdas_var.value is not None:
             for idx, ref_idx in enumerate(ref_dmus_indices):
-                lambdas_vals[dmus[ref_idx]] = float(lambdas.value[idx,0])
+                lambdas_vals[dmus[ref_idx]] = float(lambdas_var.value[idx,0])
         else:
             for ref_idx in ref_dmus_indices:
                  lambdas_vals[dmus[ref_idx]] = np.nan
 
-        # 8) Calcular scale efficiency: Para hacer esto, necesitamos la eficiencia CCR (CRS) para la misma DMU.
-        # Vamos a llamar a run_ccr con super_eff=False para obtener la eficiencia CRS.
+        # 8) Calcular scale efficiency: Necesitamos la eficiencia CCR (CRS) para la misma DMU.
         df_ccr_for_scale = run_ccr(
             df=df,
             dmu_column=dmu_column,
@@ -498,32 +516,36 @@ def run_bcc(
         # Para orientación output: SE = TE_CRS / TE_VRS = phi_CRS / phi_VRS
         if current_eff_val is not None and ccr_eff is not None and current_eff_val != 0 and not np.isnan(current_eff_val) and not np.isnan(ccr_eff):
             if orientation == "input":
+                # Eficiencia CCR (theta_CRS) / Eficiencia BCC (theta_VRS)
                 scale_eff = ccr_eff / current_eff_val
             else: # output orientation
-                scale_eff = ccr_eff / current_eff_val # Note: for output orientation, efficiency is phi. So phi_CRS / phi_VRS
+                # Eficiencia CCR (phi_CRS) / Eficiencia BCC (phi_VRS)
+                scale_eff = ccr_eff / current_eff_val
         
         # 9) Determinación de RTS (RTS_label)
         rts_label = "VRS" # Default for BCC
         if prob.status in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE]:
             # La restricción de suma de lambdas es la última (cp.sum(lambdas) == 1)
-            # para BCC, la dualidad u_0 (o sigma_0) para esta restricción determina el RTS local
-            # El valor dual está en prob.constraints[-1].dual_value
+            # El valor dual en prob.constraints[-1].dual_value determina el RTS local
             if len(prob.constraints) > 0:
                 dual_sum_lambda_constraint = prob.constraints[-1].dual_value
                 if dual_sum_lambda_constraint is not None:
-                    # Umbral para considerar un valor cercano a cero
-                    if abs(dual_sum_lambda_constraint) < 1e-6:
+                    if abs(dual_sum_lambda_constraint) < 1e-6: # Umbral para considerar un valor cercano a cero
                         rts_label = "CRS" # Constant Returns to Scale
                     elif dual_sum_lambda_constraint < 0:
-                        rts_label = "IRS" # Increasing Returns to Scale
+                        # En modelos BCC input-oriented, un dual negativo implica IRS (Increasing Returns to Scale)
+                        # En modelos BCC output-oriented, un dual negativo implica DRS (Decreasing Returns to Scale)
+                        rts_label = "IRS" if orientation == "input" else "DRS"
                     else: # dual_sum_lambda_constraint > 0
-                        rts_label = "DRS" # Decreasing Returns to Scale
+                        # En modelos BCC input-oriented, un dual positivo implica DRS (Decreasing Returns to Scale)
+                        # En modelos BCC output-oriented, un dual positivo implica IRS (Increasing Returns to Scale)
+                        rts_label = "DRS" if orientation == "input" else "IRS"
                 else:
                     rts_label = "Dual N/A"
             else:
                 rts_label = "Constraints N/A" # No constraints found
 
-        # 10) Guardar registro
+        # 10) Guardar todo en registros[i]
         registros[i] = {
             dmu_column: dmus[i],
             "efficiency": np.round(current_eff_val, 6) if current_eff_val is not None else np.nan,
