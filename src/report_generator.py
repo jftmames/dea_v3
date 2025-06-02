@@ -1,101 +1,170 @@
-# src/report_generator.py
+# src/main.py
 
+import streamlit as st
 import pandas as pd
+import uuid
+import json
 import datetime
-from io import BytesIO
 
-def generate_html_report(
-    df_dea: pd.DataFrame,
-    df_tree: pd.DataFrame,
-    df_eee: pd.DataFrame
-) -> str:
-    """
-    Genera un string con contenido HTML que incluye:
-      - Título con fecha
-      - Tabla de resultados DEA
-      - Tabla de árbol de indagación (padre/hijo)
-      - Tabla de metadatos EEE
-    Retorna HTML listo para escribir a disco o servir como descarga.
-    """
-    fecha = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    html = (
-        "<html><head><meta charset='utf-8'>"
-        "<style>"
-        "table {border-collapse: collapse; width: 100%;}"
-        "th, td {border: 1px solid #ddd; padding: 8px;}"
-        "th {background-color: #f2f2f2;}"
-        "</style>"
-        f"<title>Reporte DEA Deliberativo – {fecha}</title></head><body>"
-    )
-    html += f"<h1>Reporte DEA Deliberativo – {fecha}</h1>"
+from data_validator import validate
+from results import mostrar_resultados, plot_benchmark_spider
+from report_generator import generate_html_report, generate_excel_report
+from session_manager import init_db, save_session, load_sessions
 
-    # Sección DEA
-    html += "<h2>1. Resultados DEA</h2>"
-    html += df_dea.to_html(index=False, border=1, justify="left")
+# -------------------------------------------------------
+# 1) Inicialización de la base de datos de sesiones
+# -------------------------------------------------------
+init_db()
+default_user_id = "user_1"  # Identificador estático; ajústalo según tu lógica
 
-    # Sección Árbol
-    html += "<h2>2. Estructura de Complejo de Indagación</h2>"
-    html += df_tree.to_html(index=False, border=1, justify="left")
+# -------------------------------------------------------
+# 2) Sidebar: cargar sesiones previas
+# -------------------------------------------------------
+st.sidebar.header("Sesiones Guardadas")
+sessions = load_sessions(user_id=default_user_id)
+selected_session_id = None
 
-    # Sección EEE
-    html += "<h2>3. Métrico EEE y Metadatos</h2>"
-    html += df_eee.to_html(index=False, border=1, justify="left")
+if sessions:
+    ids = [s["session_id"] for s in sessions]
+    selected_session_id = st.sidebar.selectbox("Seleccionar sesión para recargar", ids)
 
-    html += "</body></html>"
-    return html
+    if selected_session_id:
+        sess = next(s for s in sessions if s["session_id"] == selected_session_id)
+        st.sidebar.markdown(f"**Sesión:** {sess['session_id']}")
+        st.sidebar.markdown(f"- Timestamp: {sess['timestamp']}")
+        st.sidebar.markdown(f"- EEE Score: {sess['eee_score']}")
+        st.sidebar.markdown(f"- Notas: {sess['notes']}")
 
+# -------------------------------------------------------
+# 3) Título principal y carga de archivo CSV
+# -------------------------------------------------------
+st.title("Simulador Econométrico-Deliberativo – DEA")
+uploaded_file = st.file_uploader("Cargar archivo CSV (con DMUs)", type=["csv"])
 
-def generate_excel_report(
-    df_dea: pd.DataFrame,
-    df_tree: pd.DataFrame,
-    df_eee: pd.DataFrame
-) -> BytesIO:
-    """
-    Genera un reporte Excel en memoria con varias pestañas:
-      - "DEA Results": resultados DEA
-      - "Inquiry Tree": tabla de árbol de indagación
-      - "EEE Metrics": tabla de EEE
-    Retorna un objeto BytesIO con el contenido del archivo .xlsx.
-    """
-    output = BytesIO()
-    # Usamos engine xlsxwriter por compatibilidad
-    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-        # 1) Hoja DEA Results
-        df_dea.to_excel(writer, sheet_name="DEA Results", index=False)
-        # Ajustar ancho de columnas al contenido
-        worksheet_dea = writer.sheets["DEA Results"]
-        for idx, col in enumerate(df_dea.columns):
-            max_len = (
-                df_dea[col].astype(str).map(len).max()
-                if not df_dea.empty else 0
-            )
-            max_len = max(max_len, len(col)) + 2
-            worksheet_dea.set_column(idx, idx, max_len)
+if uploaded_file:
+    df = pd.read_csv(uploaded_file)
+    st.subheader("Datos cargados")
+    st.dataframe(df)
 
-        # 2) Hoja Inquiry Tree
-        df_tree.to_excel(writer, sheet_name="Inquiry Tree", index=False)
-        worksheet_tree = writer.sheets["Inquiry Tree"]
-        for idx, col in enumerate(df_tree.columns):
-            max_len = (
-                df_tree[col].astype(str).map(len).max()
-                if not df_tree.empty else 0
-            )
-            max_len = max(max_len, len(col)) + 2
-            worksheet_tree.set_column(idx, idx, max_len)
+    # -------------------------------------------------------
+    # 4) Selección de columnas: DMU, inputs y outputs
+    # -------------------------------------------------------
+    all_columns = df.columns.tolist()
+    dmu_col = st.selectbox("Columna que identifica cada DMU", all_columns)
 
-        # 3) Hoja EEE Metrics
-        df_eee.to_excel(writer, sheet_name="EEE Metrics", index=False)
-        worksheet_eee = writer.sheets["EEE Metrics"]
-        for idx, col in enumerate(df_eee.columns):
-            max_len = (
-                df_eee[col].astype(str).map(len).max()
-                if not df_eee.empty else 0
-            )
-            max_len = max(max_len, len(col)) + 2
-            worksheet_eee.set_column(idx, idx, max_len)
+    candidate_inputs = [c for c in all_columns if c != dmu_col]
+    input_cols = st.multiselect("Seleccionar columnas de inputs", candidate_inputs)
 
-        writer.save()
+    candidate_outputs = [c for c in all_columns if c not in input_cols + [dmu_col]]
+    output_cols = st.multiselect("Seleccionar columnas de outputs", candidate_outputs)
 
-    output.seek(0)
-    return output
+    # -------------------------------------------------------
+    # 5) Botón para ejecutar DEA (CCR y BCC)
+    # -------------------------------------------------------
+    if st.button("Ejecutar DEA (CCR y BCC)"):
+        # 5.1) Validar datos formales y sugerencias LLM
+        errors = validate(df, input_cols, output_cols)
+        llm_ready = errors.get("llm", {}).get("ready", True)
 
+        if errors["formal_issues"] or not llm_ready:
+            st.error("Se encontraron problemas en los datos o sugerencias del LLM:")
+            if errors["formal_issues"]:
+                st.write("– Formal issues:")
+                for issue in errors["formal_issues"]:
+                    st.write(f"  • {issue}")
+            if "issues" in errors["llm"] and errors["llm"]["issues"]:
+                st.write("– LLM issues:")
+                for issue in errors["llm"]["issues"]:
+                    st.write(f"  • {issue}")
+        else:
+            # 5.2) Ejecutar modelos CCR y BCC
+            with st.spinner("Calculando eficiencias…"):
+                resultados = mostrar_resultados(df, dmu_col, input_cols, output_cols)
+
+            if not resultados:
+                st.error("Ocurrió un error al calcular DEA.")
+            else:
+                # 5.3) Mostrar tablas de resultados
+                df_ccr = resultados["df_ccr"]
+                df_bcc = resultados["df_bcc"]
+
+                st.subheader("Resultados CCR")
+                st.dataframe(df_ccr)
+
+                st.subheader("Resultados BCC")
+                st.dataframe(df_bcc)
+
+                # 5.4) Mostrar histogramas de eficiencia
+                st.subheader("Histograma de eficiencias CCR")
+                st.plotly_chart(resultados["hist_ccr"], use_container_width=True)
+
+                st.subheader("Histograma de eficiencias BCC")
+                st.plotly_chart(resultados["hist_bcc"], use_container_width=True)
+
+                # 5.5) Mostrar scatter 3D para CCR
+                st.subheader("Scatter 3D Inputs vs Output (CCR)")
+                st.plotly_chart(resultados["scatter3d_ccr"], use_container_width=True)
+
+                # 5.6) Benchmark spider: seleccionar una DMU
+                st.subheader("Benchmark Spider CCR")
+                dmu_options = df_ccr["DMU"].astype(str).tolist()
+                selected_dmu = st.selectbox(
+                    "Seleccionar DMU para comparar contra peers eficientes",
+                    dmu_options
+                )
+
+                if selected_dmu:
+                    merged_ccr = df_ccr.merge(df, on="DMU", how="left")
+                    spider_fig = plot_benchmark_spider(merged_ccr, selected_dmu, input_cols, output_cols)
+                    st.plotly_chart(spider_fig, use_container_width=True)
+
+                # -------------------------------------------------------
+                # 5.7) Guardar sesión
+                # -------------------------------------------------------
+                st.subheader("Guardar esta sesión")
+                inquiry_tree = {}
+                eee_score = 0.0
+                notes = st.text_area(
+                    "Notas sobre la sesión",
+                    value=sess["notes"] if (selected_session_id and "notes" in sess) else ""
+                )
+
+                if st.button("Guardar sesión actual"):
+                    save_session(
+                        default_user_id,
+                        inquiry_tree,
+                        eee_score,
+                        notes
+                    )
+                    st.success("Sesión guardada correctamente en la base de datos.")
+
+                # -------------------------------------------------------
+                # 5.8) Generar y mostrar enlaces de descarga de reportes
+                # -------------------------------------------------------
+                st.subheader("Generar reportes")
+
+                # Generar contenido HTML y mostrar botón de descarga
+                html_str = generate_html_report(
+                    df_dea=df_ccr,
+                    df_tree=pd.DataFrame(),   # Placeholder: tu DataFrame de árbol
+                    df_eee=pd.DataFrame()     # Placeholder: tu DataFrame de EEE
+                )
+                st.download_button(
+                    label="Descargar Reporte HTML",
+                    data=html_str,
+                    file_name=f"reporte_dea_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.html",
+                    mime="text/html"
+                )
+
+                # Generar contenido Excel y mostrar botón de descarga
+                excel_io = generate_excel_report(
+                    df_dea=df_ccr,
+                    df_tree=pd.DataFrame(),
+                    df_eee=pd.DataFrame()
+                )
+                st.download_button(
+                    label="Descargar Reporte Excel",
+                    data=excel_io,
+                    file_name=f"reporte_dea_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
