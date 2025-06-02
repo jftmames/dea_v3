@@ -6,8 +6,7 @@ import pandas as pd
 from openai import OpenAI
 
 # Importamos la función de validación de dea_models/utils.py
-from dea_models.utils import validate_positive_dataframe
-
+from dea_models.utils import validate_positive_dataframe, validate_dataframe
 
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -30,18 +29,26 @@ def _formal_checks(
     # 1) Validar positividad y conversión a float usando validate_positive_dataframe
     try:
         cols = inputs + outputs
-        validate_positive_dataframe(df, cols)
+        # Se usa validate_dataframe ahora que está disponible y es más general
+        validate_dataframe(df, inputs, outputs, allow_zero=False, allow_negative=False)
     except ValueError as e:
         issues.append(str(e))
 
-    # 2) Valores nulos en todo el DataFrame
+    # 2) Valores nulos en todo el DataFrame (solo en las columnas relevantes, como lo hace validate_dataframe)
+    # validate_dataframe ya debería manejar esto para inputs/outputs.
+    # Si queremos validar todo el DataFrame, podemos mantener esta línea.
+    # Si es solo para inputs/outputs, validate_dataframe ya lo cubre.
+    # Asumo que quieres una comprobación general adicional para todo el DF.
     if df.isnull().values.any():
         issues.append("Se encontraron valores nulos en el DataFrame.")
 
     # 3) Columnas no numéricas (fuera de inputs/outputs)
+    # Esta parte no es estrictamente necesaria si validate_dataframe ya se encarga de inputs/outputs.
+    # Si hay otras columnas en el DF que no son inputs/outputs y no son numéricas, esto las detectará.
     for col in df.columns:
         if col not in inputs + outputs and not pd.api.types.is_numeric_dtype(df[col]):
-            issues.append(f"Columna '{col}' no es numérica.")
+            issues.append(f"Columna '{col}' no es numérica y no es un input/output.")
+
 
     return issues
 
@@ -58,13 +65,14 @@ def _llm_suggest(
       - ready: bool
       - issues: lista de strings sobre problemas detectados
       - suggested_fixes: lista de sugerencias concretas
+      - raw: (opcional) contenido crudo si la respuesta no es JSON válido
     """
     prompt = (
         "Eres un experto en DEA. Evalúa si las columnas INPUTS y OUTPUTS "
         "son adecuadas y sugiere mejoras.\n\n"
-        f"HEAD del DataFrame (JSON):\n{df_head}\n\n"
+        f"HEAD:\n{df_head}\n\n"
         f"INPUTS: {inputs}\nOUTPUTS: {outputs}\n\n"
-        "Responde **SOLO** en JSON con las claves 'ready', 'issues', 'suggested_fixes'."
+        "Responde en JSON con 'ready', 'issues', 'suggested_fixes'."
     )
     try:
         chat = client.chat.completions.create(
@@ -72,9 +80,24 @@ def _llm_suggest(
             messages=[{"role": "user", "content": prompt}],
             temperature=0
         )
-        return json.loads(chat.choices[0].message.content)
+        content = chat.choices[0].message.content.strip()
+
+        # Si viene vacío o no JSON, json.loads lanzará JSONDecodeError
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError:
+            return {
+                "ready": False,
+                "issues": ["Respuesta del LLM no es JSON válido."],
+                "raw": content
+            }
     except Exception as e:
-        return {"error": "LLM request failed", "message": str(e)}
+        # Si la llamada al cliente OpenAI falla (timeout, clave, etc.), devolvemos un mensaje claro
+        return {
+            "ready": False,
+            "issues": [f"Error al consultar el LLM: {e}"],
+            "suggested_fixes": []
+        }
 
 
 # ---------- API pública ----------
