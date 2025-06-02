@@ -53,7 +53,7 @@ st.sidebar.markdown("---")
 # -------------------------------------------------------
 st.title("Simulador Econométrico-Deliberativo – DEA")
 
-# Inicializamos en session_state los valores que necesitaremos
+# Inicializar valores en session_state
 if "df" not in st.session_state:
     st.session_state.df = None
 if "dmu_col" not in st.session_state:
@@ -64,19 +64,17 @@ if "output_cols" not in st.session_state:
     st.session_state.output_cols = []
 if "dea_results" not in st.session_state:
     st.session_state.dea_results = None
-
-# --- NUEVO: Añadimos dos objetos en session_state para árbol y EEE ---
 if "df_tree" not in st.session_state:
     st.session_state.df_tree = None
 if "df_eee" not in st.session_state:
     st.session_state.df_eee = None
-# -------------------------------------------------------------------
+if "selected_dmu" not in st.session_state:
+    st.session_state.selected_dmu = None
 
 uploaded_file = st.file_uploader("Cargar archivo CSV (con DMUs)", type=["csv"])
 
 if uploaded_file is not None:
-    df_uploaded = pd.read_csv(uploaded_file)
-    st.session_state.df = df_uploaded
+    st.session_state.df = pd.read_csv(uploaded_file)
 
 # Mostrar DataFrame si ya existe
 if st.session_state.df is not None:
@@ -127,25 +125,13 @@ if st.session_state.df is not None:
                     st.write(f"  • {issue}")
         else:
             with st.spinner("Calculando eficiencias y generando árbol/EEE…"):
-                # Ejecutar la función que retorna no solo DEA, sino también árbol y métricas EEE
                 resultados = mostrar_resultados(
                     df.copy(),
                     st.session_state.dmu_col,
                     st.session_state.input_cols,
                     st.session_state.output_cols
                 )
-                # mostrar_resultados (o tu función equivalente) debería devolver un dict con:
-                # {
-                #   "df_ccr": DataFrame,
-                #   "df_bcc": DataFrame,
-                #   "hist_ccr": fig,
-                #   "hist_bcc": fig,
-                #   "scatter3d_ccr": fig,
-                #   "df_tree": DataFrame_del_arbol,      <--- NUEVO
-                #   "df_eee": DataFrame_métricas_EEE      <--- NUEVO
-                # }
             st.session_state.dea_results = resultados
-            # Guardar también en session_state los DataFrames de árbol y EEE
             st.session_state.df_tree = resultados.get("df_tree", pd.DataFrame())
             st.session_state.df_eee = resultados.get("df_eee", pd.DataFrame())
 
@@ -177,9 +163,6 @@ if st.session_state.df is not None:
         # -------------------------------------------------------
         st.subheader("Benchmark Spider CCR")
         dmu_options = df_ccr["DMU"].astype(str).tolist()
-        if "selected_dmu" not in st.session_state:
-            st.session_state.selected_dmu = dmu_options[0] if dmu_options else None
-
         st.session_state.selected_dmu = st.selectbox(
             "Seleccionar DMU para comparar contra peers eficientes",
             dmu_options,
@@ -200,7 +183,7 @@ if st.session_state.df is not None:
         # 8) Mostrar el "Complejo de indagación" (df_tree)
         # -------------------------------------------------------
         st.subheader("Complejo de Indagación (Árbol)")
-        if not st.session_state.df_tree.empty:
+        if st.session_state.df_tree is not None and not st.session_state.df_tree.empty:
             st.dataframe(st.session_state.df_tree)
         else:
             st.write("No hay datos del árbol de indagación para mostrar.")
@@ -209,7 +192,7 @@ if st.session_state.df is not None:
         # 9) Mostrar métricas EEE
         # -------------------------------------------------------
         st.subheader("Métricas EEE")
-        if not st.session_state.df_eee.empty:
+        if st.session_state.df_eee is not None and not st.session_state.df_eee.empty:
             st.dataframe(st.session_state.df_eee)
         else:
             st.write("No hay métricas EEE para mostrar.")
