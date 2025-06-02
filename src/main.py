@@ -18,7 +18,7 @@ st.set_page_config(layout="wide")
 # 1) Inicialización de la base de datos de sesiones
 # -------------------------------------------------------
 init_db()
-default_user_id = "user_1"
+default_user_id = "user_1"  # Identificador estático; ajústalo según tu lógica
 
 # -------------------------------------------------------
 # 2) Sidebar: cargar sesiones previas
@@ -48,7 +48,7 @@ st.sidebar.write("- Luego podrás guardar y generar reportes.")
 st.sidebar.markdown("---")
 
 # -------------------------------------------------------
-# 3) Asegurar clave en session_state antes de cualquier widget
+# 3) Asegurar claves en session_state antes de dibujar widgets
 # -------------------------------------------------------
 if "df" not in st.session_state:
     st.session_state.df = None
@@ -78,7 +78,7 @@ if uploaded_file is not None:
     st.session_state.df = pd.read_csv(uploaded_file)
 
 # -------------------------------------------------------
-# 5) Si ya hay un DataFrame cargado, avanzamos
+# 5) Si ya hay un DataFrame cargado, avanzar con selección
 # -------------------------------------------------------
 if st.session_state.df is not None:
     df = st.session_state.df.copy()
@@ -99,7 +99,6 @@ if st.session_state.df is not None:
 
     # 6.2) Multiselect para inputs
     candidate_inputs = [c for c in all_columns if c != st.session_state.dmu_col]
-    # Filtrar defaults guardados para que solo queden en candidate_inputs
     valid_input_defaults = [
         col for col in st.session_state.input_cols if col in candidate_inputs
     ]
@@ -148,13 +147,12 @@ if st.session_state.df is not None:
                     st.session_state.input_cols,
                     st.session_state.output_cols
                 )
-            # Guardar todo en session_state
             st.session_state.dea_results = resultados
             st.session_state.df_tree = resultados.get("df_tree", pd.DataFrame())
             st.session_state.df_eee = resultados.get("df_eee", pd.DataFrame())
 
     # -------------------------------------------------------
-    # 8) Si ya tenemos resultados DEA, los mostramos
+    # 8) Mostrar resultados si ya se calcularon
     # -------------------------------------------------------
     if st.session_state.dea_results is not None:
         resultados = st.session_state.dea_results
@@ -180,9 +178,10 @@ if st.session_state.df is not None:
         # 9) Benchmark Spider CCR
         # -------------------------------------------------------
         st.subheader("Benchmark Spider CCR")
-        dmu_options = df_ccr["DMU"].astype(str).tolist()
+        dmu_col = st.session_state.dmu_col
+        dmu_options = df_ccr[dmu_col].astype(str).tolist()
 
-        # Filtrar default de selected_dmu
+        # Limpiar default de selected_dmu si ya no existe
         if st.session_state.selected_dmu not in dmu_options:
             st.session_state.selected_dmu = dmu_options[0] if dmu_options else None
 
@@ -193,7 +192,7 @@ if st.session_state.df is not None:
         )
 
         if st.session_state.selected_dmu:
-            merged_ccr = df_ccr.merge(df, on="DMU", how="left")
+            merged_ccr = df_ccr.merge(df, on=dmu_col, how="left")
             spider_fig = plot_benchmark_spider(
                 merged_ccr,
                 st.session_state.selected_dmu,
@@ -245,7 +244,7 @@ if st.session_state.df is not None:
         # -------------------------------------------------------
         st.subheader("Generar reportes")
 
-        # Reporte HTML
+        # 13.1) Reporte HTML
         html_str = generate_html_report(
             df_dea=df_ccr,
             df_tree=st.session_state.df_tree,
@@ -258,7 +257,7 @@ if st.session_state.df is not None:
             mime="text/html"
         )
 
-        # Reporte Excel
+        # 13.2) Reporte Excel
         excel_io = generate_excel_report(
             df_dea=df_ccr,
             df_tree=st.session_state.df_tree,
