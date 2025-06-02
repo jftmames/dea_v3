@@ -1,5 +1,3 @@
-# src/results.py
-
 import pandas as pd
 import plotly.express as px
 
@@ -21,6 +19,8 @@ def mostrar_resultados(
       - scatter3d_ccr, scatter3d_bcc: figura 3D inputs/outputs coloreado por eficiencia
       - plot_benchmark_spider se invoca desde main.py, no aquí.
     """
+    resultados = {}
+
     # 1) Ejecutar CCR
     df_ccr = run_ccr(
         df=df,
@@ -30,6 +30,9 @@ def mostrar_resultados(
         orientation="input",
         super_eff=False
     )
+    # RENOMBRAR la columna tec_efficiency_ccr → efficiency
+    df_ccr = df_ccr.rename(columns={"tec_efficiency_ccr": "efficiency"})
+    resultados["df_ccr"] = df_ccr # Guardar en el diccionario
 
     # 2) Ejecutar BCC
     df_bcc = run_bcc(
@@ -40,28 +43,30 @@ def mostrar_resultados(
         orientation="input",
         super_eff=False
     )
+    # RENOMBRAR la columna tec_efficiency_bcc → efficiency
+    df_bcc = df_bcc.rename(columns={"tec_efficiency_bcc": "efficiency"})
+    resultados["df_bcc"] = df_bcc # Guardar en el diccionario
 
-    # 3) Unir resultados de eficiencia con df original
+    # 3) Unir resultados de eficiencia con df original (ahora 'efficiency' es el nombre común)
     merged_ccr = df_ccr.merge(df, on=dmu_column, how="left")
     merged_bcc = df_bcc.merge(df, on=dmu_column, how="left")
+    resultados["merged_ccr"] = merged_ccr
+    resultados["merged_bcc"] = merged_bcc
 
-    # 4) Crear figuras
+
+    # 4) Crear figuras de histograma (ahora ya existe 'efficiency' en ambos dfs)
     hist_ccr = plot_efficiency_histogram(df_ccr)
     hist_bcc = plot_efficiency_histogram(df_bcc)
+    resultados["hist_ccr"] = hist_ccr
+    resultados["hist_bcc"] = hist_bcc
 
+    # 5) Crear figuras de scatter 3D
     scatter3d_ccr = plot_3d_inputs_outputs(df, inputs, outputs, df_ccr, dmu_column)
     scatter3d_bcc = plot_3d_inputs_outputs(df, inputs, outputs, df_bcc, dmu_column)
+    resultados["scatter3d_ccr"] = scatter3d_ccr
+    resultados["scatter3d_bcc"] = scatter3d_bcc
 
-    return {
-        "df_ccr": df_ccr,
-        "df_bcc": df_bcc,
-        "merged_ccr": merged_ccr,
-        "merged_bcc": merged_bcc,
-        "hist_ccr": hist_ccr,
-        "hist_bcc": hist_bcc,
-        "scatter3d_ccr": scatter3d_ccr,
-        "scatter3d_bcc": scatter3d_bcc,
-    }
+    return resultados
 
 
 def plot_efficiency_histogram(dea_df: pd.DataFrame, bins: int = 20):
