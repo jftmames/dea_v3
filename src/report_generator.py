@@ -43,45 +43,54 @@ def generate_html_report(
     return html
 
 
-def generate_excel_report(
-    df_dea: pd.DataFrame,
-    df_tree: pd.DataFrame,
-    df_eee: pd.DataFrame
-) -> BytesIO:
+def generate_excel_report(df_dea: pd.DataFrame, df_tree: pd.DataFrame, df_eee: pd.DataFrame) -> BytesIO:
     """
     Genera un archivo Excel en memoria con pestañas:
       - 'DEA Results'
       - 'Inquiry Tree'
       - 'EEE Metrics'
     Retorna un BytesIO conteniendo el Excel.
+    Aplica formato de cabecera (bold, fondo, borde, centrado) y autoajusta ancho de columnas.
     """
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-        # Escribir cada DataFrame en su hoja correspondiente
+    buffer = BytesIO()
+
+    with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+        # Escribir cada DataFrame en su hoja
         df_dea.to_excel(writer, sheet_name="DEA Results", index=False)
         df_tree.to_excel(writer, sheet_name="Inquiry Tree", index=False)
         df_eee.to_excel(writer, sheet_name="EEE Metrics", index=False)
 
-        # Formato: cabeceras en negrita, fondo gris, ancho de columna ajustado
         workbook = writer.book
-        header_fmt = workbook.add_format({"bold": True, "bg_color": "#D3D3D3"})
-        for sheet_name in ["DEA Results", "Inquiry Tree", "EEE Metrics"]:
-            worksheet = writer.sheets[sheet_name]
-            # Aplicar formato a las cabeceras
-            for col_num, col_name in enumerate(writer.sheets[sheet_name].table.columns
-                                              if hasattr(writer.sheets[sheet_name], "table") 
-                                              else df_dea.columns):
-                worksheet.write(0, col_num, col_name, header_fmt)
-            # Ajustar ancho de columnas (asume 15 caracteres por defecto)
-            max_col = (
-                len(writer.sheets[sheet_name].columns) 
-                if hasattr(writer.sheets[sheet_name], "columns") 
-                else df_dea.shape[1]
-            )
-            worksheet.set_column(0, max_col - 1, 15)
+        header_fmt = workbook.add_format({
+            "bold": True,
+            "bg_color": "#D7E4BC",  # Un tono de verde claro para el fondo
+            "border": 1,
+            "align": "center",
+            "valign": "vcenter" # Alineación vertical centrada
+        })
+        
+        # Diccionario para mapear nombres de hoja a DataFrames originales
+        hoja_a_df = {
+            "DEA Results": df_dea,
+            "Inquiry Tree": df_tree,
+            "EEE Metrics": df_eee
+        }
 
-    output.seek(0)
-    return output
+        # Iterar sobre cada hoja y su DataFrame original para aplicar formato
+        for sheet_name, df_original in hoja_a_df.items():
+            worksheet = writer.sheets[sheet_name]
+            
+            # Aplicar formato a las cabeceras usando los nombres de columna del DataFrame original
+            for col_num, col_name in enumerate(df_original.columns):
+                worksheet.write(0, col_num, col_name, header_fmt)
+            
+            # Autoajustar el ancho de las columnas
+            for col_num, col_name in enumerate(df_original.columns):
+                max_len = max(df_original[col_name].astype(str).map(len).max(), len(col_name)) + 2 # +2 para un pequeño margen
+                worksheet.set_column(col_num, col_num, max_len)
+
+    buffer.seek(0)
+    return buffer
 
 
 def generate_pptx_report(
@@ -101,28 +110,54 @@ def generate_pptx_report(
 
     def add_table_slide(df: pd.DataFrame, title: str):
         slide = prs.slides.add_slide(blank_slide_layout)
-        slide.shapes.title.text = title
+        title_shape = slide.shapes.title
+        title_shape.text = title # Asignar el título
 
         rows, cols = df.shape
+        # Ajustar el tamaño y la posición de la tabla para que quepa en la diapositiva
+        # Si la tabla es muy grande, podría necesitar un ajuste más dinámico o paginación
         left = Inches(0.5)
         top = Inches(1.5)
         width = Inches(9)
-        height = Inches(5)
+        height = Inches(min(Inches(7), Inches(0.4 * (rows + 1)))) # Ajustar altura máxima para evitar que se salga
+
         table_shape = slide.shapes.add_table(rows + 1, cols, left, top, width, height)
         table = table_shape.table
 
+        # Estilo de la tabla (opcional, se puede aplicar un estilo predefinido)
+        # table.cell(0, 0)._tc.xmlL_cell(0, 0) for cell in table.iter_cells()
+        # for cell in table.iter_cells():
+        #     cell.fill.solid()
+        #     cell.fill.fore_color.rgb = RGBColor(0xDAE3F3) # Ejemplo de color de fondo claro
+        #     cell.text_frame.paragraphs[0].font.size = Pt(10)
+
         # Escribir cabeceras
         for j, col_name in enumerate(df.columns):
-            table.cell(0, j).text = str(col_name)
+            cell = table.cell(0, j)
+            cell.text = str(col_name)
+            # Opcional: Estilo para la cabecera
+            # cell.fill.solid()
+            # cell.fill.fore_color.rgb = RGBColor(0xBFBFBF) # Gris oscuro
+            # cell.text_frame.paragraphs[0].font.bold = True
+            # cell.text_frame.paragraphs[0].alignment = PP_ALIGN.CENTER
+
+
         # Escribir datos
         for i in range(rows):
             for j, col_name in enumerate(df.columns):
-                table.cell(i + 1, j).text = str(df.iloc[i, j])
+                cell = table.cell(i + 1, j)
+                cell.text = str(df.iloc[i, j])
+                # cell.text_frame.paragraphs[0].font.size = Pt(9)
+
+        # Autoajustar ancho de columnas en PowerPoint es más complejo y a menudo
+        # requiere iteración o cálculo manual basado en contenido.
+        # Por ahora, se dejarán los anchos por defecto o se ajustará manualmente en PPT.
+        # table.columns[j].width = Inches(...) # Esto sería si quisiéramos fijar un ancho
 
     # Añadir slides para cada sección
-    add_table_slide(df_dea, "Resultados DEA")
-    add_table_slide(df_tree, "Árbol de Indagación")
-    add_table_slide(df_eee, "Métricas EEE")
+    add_table_slide(df_dea, "1. Resultados DEA")
+    add_table_slide(df_tree, "2. Árbol de Indagación")
+    add_table_slide(df_eee, "3. Métricas EEE")
 
     output = BytesIO()
     prs.save(output)
