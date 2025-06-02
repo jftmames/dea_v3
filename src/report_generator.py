@@ -15,6 +15,15 @@ def generate_html_report(
       - Tabla de metadatos EEE
     Retorna HTML listo para escribir a disco o servir como descarga.
     """
+
+    # Convertir None en DataFrame vacío
+    if df_dea is None:
+        df_dea = pd.DataFrame()
+    if df_tree is None:
+        df_tree = pd.DataFrame()
+    if df_eee is None:
+        df_eee = pd.DataFrame()
+
     fecha = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     html = (
         "<html><head><meta charset='utf-8'>"
@@ -55,6 +64,15 @@ def generate_excel_report(
       - "EEE Metrics": tabla de EEE
     Retorna un objeto BytesIO con el contenido del archivo .xlsx.
     """
+
+    # Convertir None en DataFrame vacío
+    if df_dea is None:
+        df_dea = pd.DataFrame()
+    if df_tree is None:
+        df_tree = pd.DataFrame()
+    if df_eee is None:
+        df_eee = pd.DataFrame()
+
     output = BytesIO()
     # Usamos engine xlsxwriter por compatibilidad
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
@@ -90,7 +108,7 @@ def generate_excel_report(
             )
             max_len = max(max_len, len(col)) + 2
             worksheet_eee.set_column(idx, idx, max_len)
-        # Nota: no llamamos a writer.save(), el with se encarga
+        # No llamamos a writer.save(), el 'with' se encarga
 
     output.seek(0)
     return output
