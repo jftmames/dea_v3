@@ -1,5 +1,3 @@
-# src/report_generator.py
-
 import pandas as pd
 import datetime
 from io import BytesIO
@@ -92,8 +90,7 @@ def generate_excel_report(
             )
             max_len = max(max_len, len(col)) + 2
             worksheet_eee.set_column(idx, idx, max_len)
-
-        writer.save()
+        # Nota: no llamamos a writer.save(), el with se encarga
 
     output.seek(0)
     return output
