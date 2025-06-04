@@ -23,6 +23,7 @@ def compute_cross_efficiency(
       - "aggressive": eficiencia_i = min_j θ_{i|j}
       - "benevolent": eficiencia_i = max_j θ_{i|j}
     Retorna DataFrame n×n con columnas y filas = DMUs, y una fila adicional con ranking.
+    Retorna DataFrame n×n con columnas y filas = DMUs, y una columna adicional con ranking.
     """
     # Validar que la columna DMU exista
     if dmu_column not in df.columns:
@@ -48,28 +49,3 @@ def compute_cross_efficiency(
     # df_ccr_full contiene una fila por DMU, con 'lambda_vector' dict
     for j in range(n):
         lambdas_list.append(df_ccr_full.loc[j, "lambda_vector"])
-
-    # 3) Construir matriz n×n
-    cross_matrix = np.zeros((n, n))
-    for i in range(n):
-        for j in range(n):
-            lam_j = lambdas_list[j]
-            # eficiencia de i con "pesos" de j: en esta versión simplificada,
-            # usamos el valor de lambda_j para i como proxy
-            eff_ij = lam_j.get(dmus[i], 0.0)
-            cross_matrix[i, j] = eff_ij
-
-    # 4) Convertir a DataFrame
-    df_cross = pd.DataFrame(cross_matrix, index=dmus, columns=dmus)
-
-    # 5) Ranking según método
-    if method == "average":
-        df_cross["avg_peer_rating"] = df_cross.mean(axis=1)
-    elif method == "aggressive":
-        df_cross["peer_rating"] = df_cross.min(axis=1)
-    elif method == "benevolent":
-        df_cross["peer_rating"] = df_cross.max(axis=1)
-    else:
-        raise ValueError("method debe ser 'average', 'aggressive' o 'benevolent'")
-
-    return df_cross
