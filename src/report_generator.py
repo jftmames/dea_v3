@@ -45,7 +45,7 @@ def generate_html_report(
     html += df_tree.to_html(index=False, border=1, justify="left")
 
     # Sección EEE
-    html += "<h2>3. Métrico EEE y Metadatos</h2>"
+    html += "<h2>3. Métricas EEE y Metadatos</h2>"
     html += df_eee.to_html(index=False, border=1, justify="left")
 
     html += "</body></html>"
