@@ -21,13 +21,23 @@ def generate_candidates(
     """
     all_vars = input_cols + output_cols
     candidates = []
+    
+    # Añadimos la configuración actual como candidato base
+    candidates.append({
+        "candidate_id": str(uuid.uuid4()),
+        "inputs": input_cols,
+        "outputs": output_cols
+    })
+
     for var in all_vars:
-        if var in input_cols:
-            new_inputs = [v for v in input_cols if v != var]
-            new_outputs = output_cols.copy()
-        else:
-            new_inputs = input_cols.copy()
-            new_outputs = [v for v in output_cols if v != var]
+        new_inputs = input_cols.copy()
+        new_outputs = output_cols.copy()
+
+        if var in new_inputs:
+            new_inputs.remove(var)
+        elif var in new_outputs:
+            new_outputs.remove(var)
+
         if not new_inputs or not new_outputs:
             continue
 
@@ -36,9 +46,9 @@ def generate_candidates(
             "inputs": new_inputs,
             "outputs": new_outputs
         })
-        if len(candidates) >= n_candidates:
+        if len(candidates) > n_candidates: # > para contar el base
             break
-
+            
     return candidates
 
 
@@ -56,22 +66,23 @@ def evaluate_candidates(
     for cand in candidates:
         inp = cand["inputs"]
         outp = cand["outputs"]
-        validate_positive_dataframe(df, inp + outp)
+        
+        try:
+            validate_positive_dataframe(df, inp + outp)
+            df_eff = _run_dea_internal(
+                df=df,
+                dmu_col_name=dmu_column,
+                inputs=inp,
+                outputs=outp,
+                model=model,
+                orientation="input",
+                super_eff=False
+            )
+            avg_eff = float(df_eff["efficiency"].mean()) if not df_eff.empty and "efficiency" in df_eff.columns else np.nan
+        except ValueError as e:
+            print(f"Skipping candidate {inp}/{outp} due to validation error: {e}")
+            avg_eff = np.nan
 
-        # --- CORRECCIÓN ---
-        # Pasando explícitamente el nombre de la columna DMU a la función interna.
-        df_eff = _run_dea_internal(
-            df=df,
-            dmu_col_name=dmu_column,
-            inputs=inp,
-            outputs=outp,
-            model=model,
-            orientation="input",
-            super_eff=False
-        )
-        avg_eff = float(df_eff["efficiency"].mean()) if not df_eff.empty and "efficiency" in df_eff.columns else np.nan
-
-        # Calcular EEE simulado (lógica de ejemplo)
         eee_sim = avg_eff * 100 if not np.isnan(avg_eff) else np.nan
 
         rows.append({
