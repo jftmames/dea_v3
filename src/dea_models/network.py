@@ -1,9 +1,10 @@
 # src/dea_models/network.py
+
 import numpy as np
 import pandas as pd
 import cvxpy as cp
 
-from src.dea_models.utils import validate_positive_dataframe # Corregido a importación absoluta
+from .utils import validate_positive_dataframe
 
 def run_network_dea(
     df: pd.DataFrame,
