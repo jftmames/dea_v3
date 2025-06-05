@@ -12,7 +12,7 @@ if script_dir not in sys.path:
     sys.path.insert(0, script_dir)
 
 # -------------------------------------------------------
-# 1) Importaciones Adicionales
+# 1) Importaciones
 # -------------------------------------------------------
 from data_validator import validate
 from results import mostrar_resultados
@@ -111,7 +111,6 @@ if uploaded_file is not None:
     st.rerun()
 
 # --- Flujo principal de la UI ---
-# MÉTODO SEGURO para comprobar el DataFrame
 if 'df' in st.session_state and st.session_state.df is not None:
     df = st.session_state.df
     st.subheader("Configuración del Análisis")
@@ -153,7 +152,7 @@ if 'df' in st.session_state and st.session_state.df is not None:
                 
                 st.session_state.app_status = "results_ready"
             st.success("Análisis completado.")
-            st.rerun()
+            # La línea st.rerun() que causaba el bucle ha sido eliminada.
 
 # --- Mostrar resultados ---
 if st.session_state.get('app_status') == "results_ready" and st.session_state.get('dea_results'):
