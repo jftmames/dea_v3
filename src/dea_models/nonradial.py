@@ -1,5 +1,4 @@
 # src/dea_models/nonradial.py
-
 import numpy as np
 import pandas as pd
 import cvxpy as cp
@@ -65,13 +64,22 @@ def run_sbm(
         # Σ λ = 1 (solo si VRS)
         if rts == "VRS":
             cons.append(cp.sum(lambdas) == 1)
+        elif rts != "CRS":
+            raise ValueError("rts debe ser 'CRS' o 'VRS'")
 
         if orientation == "input":
-            # Función objetivo: min (1/m Σ (x0_i - s_i^-)/x0_i)
-            obj = cp.Minimize((1/m) * cp.sum((x0 - s_minus) / x0))
+            # Función objetivo: min (1 - (1/m) Σ (s_i^-)/x0_i)
+            # Que es equivalente a: min (1/m) Σ (x0_i - s_i^-)/x0_i
+            # Para SBM, la eficiencia es 1 - (1/m) * sum(s_minus / x0)
+            # El objetivo de cvxpy es minimizar (sum(s_minus / x0))
+            # Luego la eficiencia es 1 - (1/m) * optimal_obj_value
+            obj = cp.Minimize(cp.sum(s_minus / x0) / m) # Minimiza el promedio de slacks fraccionales
         else:  # output-oriented
-            # Función objetivo: max (1/s Σ (y0_r + s_r^+)/y0_r)
-            obj = cp.Maximize((1/s) * cp.sum((y0 + s_plus) / y0))
+            # Función objetivo: max (1 + (1/s) Σ (s_r^+)/y0_r)
+            # O equivalentemente: max (1/s) Σ (y0_r + s_r^+)/y0_r
+            # El objetivo de cvxpy es maximizar (sum(s_plus / y0))
+            # Luego la eficiencia es 1 + (1/s) * optimal_obj_value
+            obj = cp.Maximize(cp.sum(s_plus / y0) / s) # Maximiza el promedio de slacks fraccionales
 
         prob = cp.Problem(obj, cons)
         prob.solve(
@@ -83,14 +91,20 @@ def run_sbm(
         )
 
         # Leer eficiencia, slacks y lambdas
-        if orientation == "input":
-            eff_val = float(((x0 - s_minus).value / x0).mean()) if s_minus.value is not None else np.nan
-        else:
-            eff_val = float(((y0 + s_plus).value / y0).mean()) if s_plus.value is not None else np.nan
-
-        lambdas_vals = {dmus[j]: float(lambdas.value[j]) for j in range(n)}
-        slacks_in = {input_cols[k]: float(s_minus.value[k]) for k in range(m)}
-        slacks_out = {output_cols[r]: float(s_plus.value[r]) for r in range(s)}
+        eff_val = np.nan
+        if prob.status in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE]:
+            if orientation == "input":
+                # Eficiencia SBM = 1 - (1/m) * sum(s_minus / x0)
+                # El valor objetivo de CVXPY es (sum(s_minus / x0)) / m
+                eff_val = 1 - float(prob.value) if prob.value is not None else np.nan
+            else:  # output-oriented
+                # Eficiencia SBM = 1 + (1/s) * sum(s_plus / y0)
+                # El valor objetivo de CVXPY es (sum(s_plus / y0)) / s
+                eff_val = 1 + float(prob.value) if prob.value is not None else np.nan
+        
+        lambdas_vals = {dmus[j]: float(lambdas.value[j]) for j in range(n)} if lambdas.value is not None else {}
+        slacks_in = {input_cols[k]: float(s_minus.value[k]) for k in range(m)} if s_minus.value is not None else {col:np.nan for col in input_cols}
+        slacks_out = {output_cols[r]: float(s_plus.value[r]) for r in range(s)} if s_plus.value is not None else {col:np.nan for col in output_cols}
 
         resultados.append({
             dmu_column: dmus[i],
@@ -158,6 +172,8 @@ def run_radial_distance(
         cons.append(X @ lambdas <= x0 - t * g_x)
         if rts == "VRS":
             cons.append(cp.sum(lambdas) == 1)
+        elif rts != "CRS":
+            raise ValueError("rts debe ser 'CRS' o 'VRS'")
 
         obj = cp.Minimize(t)
         prob = cp.Problem(obj, cons)
@@ -170,19 +186,27 @@ def run_radial_distance(
         )
 
         t_val = float(t.value) if t.value is not None else np.nan
-        lambdas_vals = {dmus[j]: float(lambdas.value[j]) for j in range(n)}
+        lambdas_vals = {dmus[j]: float(lambdas.value[j]) for j in range(n)} if lambdas.value is not None else {}
 
         # Slack de insumos: x0 - t*g_x - Xλ
         slacks_in = {}
-        Xl = X @ lambdas.value
-        for k in range(m):
-            slacks_in[input_cols[k]] = float(x0[k] - t_val * g_x[k] - Xl[k])
+        if lambdas.value is not None:
+            Xl = X @ lambdas.value
+            for k in range(m):
+                slacks_in[input_cols[k]] = float(x0[k] - t_val * g_x[k] - Xl[k])
+                if slacks_in[input_cols[k]] < 1e-9: slacks_in[input_cols[k]] = 0.0 # Threshold for zero
+        else:
+            slacks_in = {col: np.nan for col in input_cols}
 
         # Slack de outputs: Yλ - y0 - t*g_y
         slacks_out = {}
-        Yl = Y @ lambdas.value
-        for r in range(s):
-            slacks_out[output_cols[r]] = float(Yl[r] - y0[r] - t_val * g_y[r])
+        if lambdas.value is not None:
+            Yl = Y @ lambdas.value
+            for r in range(s):
+                slacks_out[output_cols[r]] = float(Yl[r] - y0[r] - t_val * g_y[r])
+                if slacks_out[output_cols[r]] < 1e-9: slacks_out[output_cols[r]] = 0.0 # Threshold for zero
+        else:
+            slacks_out = {col: np.nan for col in output_cols}
 
         resultados.append({
             dmu_column: dmus[i],
