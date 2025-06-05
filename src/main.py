@@ -12,7 +12,7 @@ if script_dir not in sys.path:
     sys.path.insert(0, script_dir)
 
 # -------------------------------------------------------
-# 1) Importaciones
+# 1) Importaciones Adicionales
 # -------------------------------------------------------
 from data_validator import validate
 from results import mostrar_resultados
