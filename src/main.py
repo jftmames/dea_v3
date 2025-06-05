@@ -47,7 +47,8 @@ def get_inquiry_and_eee(_root_q, _context, _df_hash):
 # -------------------------------------------------------
 # 4) Inicialización de st.session_state
 # -------------------------------------------------------
-if 'app_status' not in st.session_state:
+def initialize_state():
+    """Inicializa o resetea el estado de la sesión."""
     st.session_state.app_status = "initial"
     st.session_state.df = None
     st.session_state.dmu_col = None
@@ -60,9 +61,13 @@ if 'app_status' not in st.session_state:
     st.session_state.df_eee = None
     st.session_state.selected_dmu = None
 
-# --- CORRECCIÓN #2: LÓGICA DE CARGA DE SESIÓN COMPLETA ---
+if 'app_status' not in st.session_state:
+    initialize_state()
+
+# --- Lógica de carga de sesión ---
 def load_full_session(session_data):
     """Carga el estado COMPLETO de una sesión en st.session_state."""
+    initialize_state() # Resetea primero para asegurar un estado limpio
     st.session_state.df = pd.DataFrame(session_data.get('df_data', []))
     st.session_state.dmu_col = session_data.get('dmu_col')
     st.session_state.input_cols = session_data.get('input_cols', [])
@@ -70,25 +75,27 @@ def load_full_session(session_data):
     st.session_state.inquiry_tree = session_data.get('inquiry_tree')
     st.session_state.eee_score = session_data.get('eee_score', 0.0)
 
-    # Reconstruir DataFrames de resultados y otros
     dea_res_raw = session_data.get('dea_results', {})
     dea_results_reloaded = {}
     if dea_res_raw:
         for k, v in dea_res_raw.items():
             if isinstance(v, list):
                 dea_results_reloaded[k] = pd.DataFrame(v)
-    # Volver a generar las figuras que no se guardan
+    
     if dea_results_reloaded and not dea_results_reloaded.get('df_ccr', pd.DataFrame()).empty:
-        dea_results_reloaded['hist_ccr'] = plot_efficiency_histogram(dea_results_reloaded['df_ccr'])
-        dea_results_reloaded['hist_bcc'] = plot_efficiency_histogram(dea_results_reloaded['df_bcc'])
-        dea_results_reloaded['scatter3d_ccr'] = plot_3d_inputs_outputs(st.session_state.df, st.session_state.input_cols, st.session_state.output_cols, dea_results_reloaded['df_ccr'], st.session_state.dmu_col)
+        df_ccr = dea_results_reloaded['df_ccr']
+        df_bcc = dea_results_reloaded.get('df_bcc')
+        if df_ccr is not None:
+             dea_results_reloaded['hist_ccr'] = plot_efficiency_histogram(df_ccr)
+        if df_bcc is not None:
+             dea_results_reloaded['hist_bcc'] = plot_efficiency_histogram(df_bcc)
+        if df_ccr is not None and st.session_state.df is not None:
+            dea_results_reloaded['scatter3d_ccr'] = plot_3d_inputs_outputs(st.session_state.df, st.session_state.input_cols, st.session_state.output_cols, df_ccr, st.session_state.dmu_col)
     
     st.session_state.dea_results = dea_results_reloaded
     st.session_state.df_tree = pd.DataFrame(session_data.get('df_tree_data', []))
     st.session_state.df_eee = pd.DataFrame(session_data.get('df_eee_data', []))
     
-    # Resetear la selección de DMU para que se tome la primera por defecto
-    st.session_state.selected_dmu = None
     st.session_state.app_status = "results_ready"
     st.success(f"Sesión '{session_data.get('session_id')}' cargada completamente.")
     st.rerun()
@@ -118,22 +125,11 @@ st.title("Simulador Econométrico-Deliberativo – DEA")
 
 uploaded_file = st.file_uploader("Cargar nuevo archivo CSV", type=["csv"])
 if uploaded_file is not None:
-    # Reiniciar estado al cargar un nuevo archivo para asegurar consistencia
-    st.session_state.app_status = "initial"
+    initialize_state() # Llama a la función para un reseteo limpio
     st.session_state.df = pd.read_csv(uploaded_file)
-    st.session_state.dmu_col = None
-    st.session_state.input_cols = []
-    st.session_state.output_cols = []
-    st.session_state.dea_results = None
-    st.session_state.inquiry_tree = None
-    st.session_state.df_tree = None
-    st.session_state.eee_score = 0.0
-    st.session_state.df_eee = None
-    st.session_state.selected_dmu = None
     st.rerun()
 
 # --- Flujo principal de la UI ---
-# VERIFICACIÓN SEGURA: Comprobar si 'df' existe en el estado antes de usarlo
 if 'df' in st.session_state and st.session_state.df is not None:
     df = st.session_state.df
     st.subheader("Configuración del Análisis")
@@ -141,13 +137,12 @@ if 'df' in st.session_state and st.session_state.df is not None:
     col1, col2 = st.columns(2)
     with col1:
         all_columns = df.columns.tolist()
-        # ACCESO DEFENSIVO para evitar AttributeError
-        current_dmu = getattr(st.session_state, 'dmu_col', None)
+        current_dmu = st.session_state.get('dmu_col')
         dmu_index = all_columns.index(current_dmu) if current_dmu and current_dmu in all_columns else 0
         st.selectbox("Columna de DMU", all_columns, index=dmu_index, key='dmu_col')
     with col2:
-        st.multiselect("Columnas de Inputs", [c for c in all_columns if c != st.session_state.dmu_col], key='input_cols', default=st.session_state.input_cols)
-        st.multiselect("Columnas de Outputs", [c for c in all_columns if c not in [st.session_state.dmu_col] + st.session_state.input_cols], key='output_cols', default=st.session_state.output_cols)
+        st.multiselect("Columnas de Inputs", [c for c in all_columns if c != st.session_state.dmu_col], key='input_cols', default=st.session_state.get('input_cols', []))
+        st.multiselect("Columnas de Outputs", [c for c in all_columns if c not in [st.session_state.dmu_col] + st.session_state.input_cols], key='output_cols', default=st.session_state.get('output_cols', []))
 
     if st.button("🚀 Ejecutar Análisis DEA", use_container_width=True):
         if not st.session_state.input_cols or not st.session_state.output_cols:
@@ -166,8 +161,6 @@ if 'df' in st.session_state and st.session_state.df is not None:
                             tree_data_list.append({"Nodo": key, "Padre": parent_path or "Raíz"})
                             if isinstance(value, dict):
                                 flatten_tree(value, key)
-                    
-                    root_key = list(st.session_state.inquiry_tree.keys())[0]
                     flatten_tree(st.session_state.inquiry_tree, "")
 
                 st.session_state.df_tree = pd.DataFrame(tree_data_list)
@@ -180,10 +173,8 @@ if 'df' in st.session_state and st.session_state.df is not None:
             st.success("Análisis completado.")
             st.rerun()
 
-# -------------------------------------------------------
-# 8) Mostrar resultados si el estado es 'results_ready'
-# -------------------------------------------------------
-if st.session_state.app_status == "results_ready" and st.session_state.dea_results:
+# --- Mostrar resultados ---
+if 'app_status' in st.session_state and st.session_state.app_status == "results_ready" and st.session_state.get('dea_results'):
     st.header("Resultados del Análisis", divider='rainbow')
 
     st.subheader("📊 Tabla de Eficiencias (CCR)")
@@ -193,12 +184,8 @@ if st.session_state.app_status == "results_ready" and st.session_state.dea_resul
     dmu_options = st.session_state.dea_results["df_ccr"][st.session_state.dmu_col].astype(str).tolist()
     
     selected_dmu_index = dmu_options.index(st.session_state.selected_dmu) if st.session_state.selected_dmu in dmu_options else 0
-    st.selectbox(
-        "Seleccionar DMU para comparar:",
-        options=dmu_options,
-        index=selected_dmu_index,
-        key="selected_dmu"
-    )
+    st.selectbox("Seleccionar DMU para comparar:", options=dmu_options, index=selected_dmu_index, key="selected_dmu")
+    
     if st.session_state.selected_dmu:
         spider_fig = plot_benchmark_spider(st.session_state.dea_results["merged_ccr"], st.session_state.selected_dmu, st.session_state.input_cols, st.session_state.output_cols)
         st.plotly_chart(spider_fig, use_container_width=True)
@@ -209,7 +196,7 @@ if st.session_state.app_status == "results_ready" and st.session_state.dea_resul
         st.plotly_chart(tree_map_fig, use_container_width=True)
 
     st.subheader("🧠 Métrica de Calidad del Diagnóstico (EEE)")
-    st.info("El **Índice de Equilibrio Erotético (EEE)** mide la calidad y robustez del árbol de diagnóstico (0 a 1). Un valor más alto indica un análisis más completo.")
+    st.info("El **Índice de Equilibrio Erotético (EEE)** mide la calidad y robustez del árbol de diagnóstico (0 a 1).")
     st.metric(label="Puntuación EEE", value=f"{st.session_state.eee_score:.4f}")
 
     st.header("Acciones", divider='rainbow')
@@ -217,12 +204,7 @@ if st.session_state.app_status == "results_ready" and st.session_state.dea_resul
     
     if st.button("💾 Guardar Sesión Actual", use_container_width=True):
         with st.spinner("Guardando..."):
-            serializable_dea_results = {}
-            if st.session_state.dea_results:
-                for key, value in st.session_state.dea_results.items():
-                    if isinstance(value, pd.DataFrame):
-                        serializable_dea_results[key] = value.to_dict('records')
-            
+            serializable_dea_results = {k: v.to_dict('records') for k, v in st.session_state.dea_results.items() if isinstance(v, pd.DataFrame)}
             save_session(
                 user_id=default_user_id,
                 inquiry_tree=st.session_state.inquiry_tree, eee_score=st.session_state.eee_score, notes=notes,
