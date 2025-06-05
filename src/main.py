@@ -17,17 +17,16 @@ if script_dir not in sys.path:
 from data_validator import validate
 from results import mostrar_resultados
 from report_generator import generate_html_report, generate_excel_report
-from session_manager import init_db, save_session, load_sessions
+# La importación de session_manager ha sido eliminada.
 from inquiry_engine import generate_inquiry, to_plotly_tree
 from epistemic_metrics import compute_eee
 from dea_models.visualizations import plot_benchmark_spider, plot_efficiency_histogram, plot_3d_inputs_outputs
 
 # -------------------------------------------------------
-# 2) Configuración y BD
+# 2) Configuración
 # -------------------------------------------------------
 st.set_page_config(layout="wide")
-init_db()
-default_user_id = "user_1"
+# La llamada a init_db() ha sido eliminada.
 
 # -------------------------------------------------------
 # 3) Funciones de inicialización y carga
@@ -65,38 +64,11 @@ def get_inquiry_and_eee(_root_q, _context, _df_hash):
     eee_metrics = compute_eee(inquiry_tree, depth_limit=5, breadth_limit=5)
     return inquiry_tree, eee_metrics
 
-def load_full_session(session_data):
-    initialize_state()
-    st.session_state.df = pd.DataFrame(session_data.get('df_data', []))
-    st.session_state.dmu_col = session_data.get('dmu_col')
-    st.session_state.input_cols = session_data.get('input_cols', [])
-    st.session_state.output_cols = session_data.get('output_cols', [])
-    st.session_state.inquiry_tree = session_data.get('inquiry_tree')
-    st.session_state.eee_metrics = session_data.get('eee_metrics')
-    st.session_state.df_tree = pd.DataFrame(session_data.get('df_tree_data', []))
-    st.session_state.df_eee = pd.DataFrame(session_data.get('df_eee_data', []))
-    dea_res_raw = session_data.get('dea_results', {})
-    st.session_state.dea_results = {k: pd.DataFrame(v) for k, v in dea_res_raw.items() if isinstance(v, list)}
-    st.session_state.app_status = "results_ready"
-    st.success(f"Sesión '{session_data.get('session_id')}' cargada.")
-    st.rerun()
-
 # -------------------------------------------------------
 # 4) Sidebar
 # -------------------------------------------------------
-with st.sidebar:
-    st.header("Simulador DEA – Sesiones Guardadas")
-    sessions = load_sessions(user_id=default_user_id)
-    if not sessions:
-        st.write("No hay sesiones guardadas.")
-    else:
-        session_options = {f"{s['timestamp'].split('T')[0]} - {s.get('notes', 'Sin notas')[:20]}": s['session_id'] for s in sorted(sessions, key=lambda x: x['timestamp'], reverse=True)}
-        selected_session_display = st.selectbox("Seleccionar sesión para recargar", session_options.keys(), index=None, placeholder="Elige una sesión guardada...")
-        if st.button("Cargar Sesión Seleccionada") and selected_session_display:
-            session_id_to_load = session_options[selected_session_display]
-            session_to_load = next((s for s in sessions if s['session_id'] == session_id_to_load), None)
-            if session_to_load:
-                load_full_session(session_to_load)
+st.sidebar.header("Configuración")
+st.sidebar.info("La funcionalidad de guardar y cargar sesiones ha sido desactivada para simplificar la aplicación.")
 
 # -------------------------------------------------------
 # 5) Área principal
@@ -131,8 +103,6 @@ if 'df' in st.session_state and st.session_state.df is not None:
         dmu_col_index = df.columns.tolist().index(st.session_state.get('dmu_col')) if st.session_state.get('dmu_col') in df.columns else 0
         st.selectbox("Columna de DMU", df.columns.tolist(), key='dmu_col', index=dmu_col_index)
     with col2:
-        # **LA CORRECCIÓN CLAVE ESTÁ AQUÍ: Eliminado el parámetro 'default'**
-        # El widget usará automáticamente st.session_state.input_cols porque tienen la misma 'key'.
         st.multiselect("Columnas de Inputs", [c for c in df.columns.tolist() if c != st.session_state.dmu_col], key='input_cols')
         st.multiselect("Columnas de Outputs", [c for c in df.columns.tolist() if c not in [st.session_state.dmu_col] + st.session_state.input_cols], key='output_cols')
 
@@ -230,13 +200,8 @@ if st.session_state.get('app_status') == "results_ready" and st.session_state.ge
                 st.markdown("**D3: Trazabilidad del Razonamiento**")
                 st.progress(eee.get('D3', 0), text=f"Puntuación: {eee.get('D3', 0):.2f}")
 
-    st.header("Acciones", divider='rainbow')
-    notes = st.text_area("Notas de la sesión")
-    
-    if st.button("💾 Guardar Sesión", use_container_width=True):
-        st.warning("La funcionalidad de guardar sesión ha sido desactivada.")
-
-    st.subheader("Generar Reportes")
+    # --- SECCIÓN DE REPORTES ---
+    st.header("Generar Reportes", divider='rainbow')
     col1, col2 = st.columns(2)
     with col1:
         st.download_button(
