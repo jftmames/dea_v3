@@ -15,31 +15,30 @@ from results import mostrar_resultados
 from inquiry_engine import generate_inquiry, to_plotly_tree
 from epistemic_metrics import compute_eee
 from openai_helpers import generate_analysis_proposals
-from dea_models.visualizations import plot_hypothesis_distribution
+from dea_models.visualizations import plot_hypothesis_distribution, plot_benchmark_spider
 
 # --- 2) Configuración ---
 st.set_page_config(layout="wide", page_title="DEA Deliberativo con IA")
 
-# --- 3) Funciones de estado y caché (CORREGIDAS) ---
+# --- 3) Funciones de estado y caché ---
 def initialize_state():
-    """Inicializa el estado de la sesión para un nuevo fichero."""
+    """Inicializa/resetea el estado de la sesión."""
     for key in list(st.session_state.keys()):
         if not key.startswith('_'):
             del st.session_state[key]
     st.session_state.app_status = "initial"
-    st.session_state.plot_variable_name = None # Añadido
+    st.session_state.plot_variable_name = None
 
 def reset_analysis_state():
     """Resetea el estado cuando cambia la configuración del modelo."""
-    st.session_state.app_status = "proposal_selected" # Vuelve a este estado
+    st.session_state.app_status = "proposal_selected"
     st.session_state.dea_results = None
     st.session_state.inquiry_tree = None
-    st.session_state.plot_variable_name = None # Añadido
+    st.session_state.plot_variable_name = None
 
 if 'app_status' not in st.session_state:
     initialize_state()
 
-# ... (Las funciones de caché no cambian) ...
 @st.cache_data
 def run_dea_analysis(_df, dmu_col, input_cols, output_cols):
     return mostrar_resultados(_df.copy(), dmu_col, input_cols, output_cols)
@@ -82,9 +81,10 @@ if st.session_state.app_status != "initial":
             with st.spinner("La IA está analizando tus datos y generando propuestas..."):
                 proposals_data = get_analysis_proposals(df)
                 st.session_state.proposals = proposals_data.get("proposals", [])
-                if not st.session_state.proposals:
-                    st.error("La IA no pudo generar propuestas.")
-                    st.stop()
+        
+        if not st.session_state.get("proposals"):
+            st.error("La IA no pudo generar propuestas. Por favor, revisa el formato del fichero o la clave de API.")
+            st.stop()
 
         if 'selected_proposal' not in st.session_state: st.session_state.selected_proposal = None
 
@@ -100,11 +100,10 @@ if st.session_state.app_status != "initial":
                         reset_analysis_state()
                         st.rerun()
     
-    # ETAPA 3: Ejecución y Resultados
+    # ETAPAS 3, 4 y 5: se muestran tras seleccionar una propuesta
     if st.session_state.get("selected_proposal"):
         proposal = st.session_state.selected_proposal
         
-        # Solo mostramos el Paso 2 si no se ha avanzado más allá
         if st.session_state.app_status == "proposal_selected":
              st.header(f"Paso 3: Analizando bajo el enfoque '{proposal['title']}'", divider="blue")
              st.success(f"**Análisis seleccionado:** {proposal['title']}. {proposal['reasoning']}")
@@ -122,70 +121,4 @@ if st.session_state.app_status != "initial":
             st.header("Paso 4: Razona y Explora las Causas con IA", divider="blue")
             
             if st.button("Generar Hipótesis de Ineficiencia con IA", use_container_width=True):
-                 with st.spinner("La IA está razonando sobre los resultados..."):
-                    avg_eff = results["df_ccr"]["tec_efficiency_ccr"].mean()
-                    context = {"inputs": proposal['inputs'], "outputs": proposal['outputs'], "avg_efficiency_ccr": avg_eff}
-                    root_question = f"Bajo el enfoque '{proposal['title']}', ¿cuáles son las principales causas de la ineficiencia?"
-                    tree, error = run_inquiry_engine(root_question, context)
-                    if error: st.error(f"Error: {error}")
-                    st.session_state.inquiry_tree = tree
-                    st.session_state.plot_variable_name = None
-                    st.session_state.app_status = "inquiry_done"
-
-            if st.session_state.get("inquiry_tree"):
-                # ... (código para mostrar el árbol y EEE, sin cambios) ...
-
-                # --- SECCIÓN DE EXPLORACIÓN INTERACTIVA (LÓGICA MEJORADA) ---
-                st.subheader("Exploración Interactiva de Hipótesis", anchor=False)
-                
-                # --- Línea de depuración para ver el estado actual ---
-                st.caption(f"Estado de depuración | Variable a explorar: `{st.session_state.get('plot_variable_name')}`")
-
-                placeholder = st.container()
-
-                # Extraer hojas del árbol para crear botones
-                leaf_nodes = []
-                def find_leaves(node):
-                    if not isinstance(node, dict) or not node: return
-                    is_leaf = True
-                    for value in node.values():
-                        if isinstance(value, dict) and value:
-                            is_leaf = False
-                            find_leaves(value)
-                    if is_leaf: leaf_nodes.extend(list(node.keys()))
-                find_leaves(st.session_state.inquiry_tree)
-                
-                # Crear los botones de exploración
-                cols = st.columns(3)
-                col_idx = 0
-                for node in leaf_nodes:
-                    match = re.search(r"Analizar (input|output): \[(.*?)\]", node)
-                    if match:
-                        var_name = match.group(2).strip()
-                        with cols[col_idx % 3]:
-                            if st.button(f"Explorar: {node}", key=node, use_container_width=True):
-                                st.session_state.plot_variable_name = var_name
-                        col_idx += 1
-
-                # Si hay una variable seleccionada, mostrar el gráfico en el placeholder
-                if st.session_state.get("plot_variable_name"):
-                    var_to_plot = st.session_state.plot_variable_name
-                    with placeholder:
-                        st.markdown(f"#### Análisis de la hipótesis: '{var_to_plot}'")
-                        with st.spinner(f"Generando gráfico para '{var_to_plot}'..."):
-                            fig = plot_hypothesis_distribution(
-                                df_results=results['df_ccr'],
-                                df_original=df,
-                                variable=var_to_plot,
-                                dmu_col=df.columns[0]
-                            )
-                            st.plotly_chart(fig, use_container_width=True)
-                            if st.button("Cerrar exploración"):
-                                st.session_state.plot_variable_name = None
-                                st.rerun()
-
-            # ETAPA 5: Resultados Detallados
-            st.header("Paso 5: Resultados Numéricos Detallados", divider="blue")
-            tab_ccr, tab_bcc = st.tabs(["**Resultados CCR**", "**Resultados BCC**"])
-            with tab_ccr: st.dataframe(results.get("df_ccr"))
-            with tab_bcc: st.dataframe(results.get("df_bcc"))
+                 with st.spinner("La IA está razonando sobre los
