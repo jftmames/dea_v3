@@ -113,18 +113,40 @@ def format_lambda_table(lambda_dicts: list[dict[str, float]]) -> pd.DataFrame:
         return pd.DataFrame()
 
     # Determinar el conjunto de peers/DMUs a partir del primer elemento
-    dmus = list(lambda_dicts[0].keys())
+    all_peer_dmus = set()
+    for d_dict in lambda_dicts:
+        all_peer_dmus.update(d_dict.keys())
+    
+    dmus = sorted(list(all_peer_dmus)) # Ensure consistent column order
 
-    # Construir filas asegurando orden consistente de columnas
-    rows = [
-        {peer: lam.get(peer, 0.0) for peer in dmus}
-        for lam in lambda_dicts
-    ]
+    # Create a list of dictionaries, where each dictionary is a row
+    # (corresponding to one evaluated DMU)
+    rows_data = []
+    for l_dict in lambda_dicts:
+        row = {peer: l_dict.get(peer, 0.0) for peer in all_peer_dmus}
+        rows_data.append(row)
+    
+    # If the caller wants to map this back to evaluated DMU names,
+    # they would do `df_lambda.set_index(df_results['DMU'])` or similar.
+    # For now, just return the matrix of lambdas.
+    df_result = pd.DataFrame(rows_data, columns=all_peer_dmus)
+    return df_result
 
-    df = pd.DataFrame(rows, index=dmus)
 
-    # Poner los nombres de las DMUs como columna explícita
-    df.reset_index(inplace=True)
-    df.rename(columns={"index": "DMU"}, inplace=True)
-
-    return df
+def check_monotonic_data(df: pd.DataFrame, input_cols: list[str], output_cols: list[str]) -> list[str]:
+    """
+    Checks for monotonicity assumption in DEA (more inputs -> more outputs, less inputs -> less outputs).
+    This is a conceptual check, not a formal mathematical one.
+    Returns a list of warnings/issues if obvious non-monotonicity is detected.
+    """
+    issues = []
+    # This is a complex check to implement rigorously without a full production possibility set.
+    # For a simple heuristic: if a DMU has strictly more inputs and strictly less outputs than another,
+    # but still considered efficient, it might indicate issues.
+    # For MVP, this might be better handled by LLM suggestions or manual review rather than strict code.
+    # Placeholder for future more advanced checks.
+    
+    # Simple check: If any input increases while all outputs decrease (or stay same), it's problematic.
+    # Or if any output increases while all inputs decrease (or stay same), and still inefficient.
+    # This often relates to outliers.
+    return issues
