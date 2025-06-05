@@ -129,10 +129,13 @@ if 'df' in st.session_state and st.session_state.df is not None:
 
     col1, col2 = st.columns(2)
     with col1:
-        st.selectbox("Columna de DMU", df.columns.tolist(), key='dmu_col', index=0)
+        # Usamos .get() para seguridad, aunque initialize_state() ya lo asegura
+        dmu_col_index = df.columns.tolist().index(st.session_state.get('dmu_col')) if st.session_state.get('dmu_col') in df.columns else 0
+        st.selectbox("Columna de DMU", df.columns.tolist(), key='dmu_col', index=dmu_col_index)
     with col2:
-        st.multiselect("Columnas de Inputs", [c for c in df.columns.tolist() if c != st.session_state.dmu_col], key='input_cols')
-        st.multiselect("Columnas de Outputs", [c for c in df.columns.tolist() if c not in [st.session_state.dmu_col] + st.session_state.input_cols], key='output_cols')
+        # **LA CORRECCIÓN CLAVE ESTÁ AQUÍ: Añadido el parámetro 'default'**
+        st.multiselect("Columnas de Inputs", [c for c in df.columns.tolist() if c != st.session_state.dmu_col], key='input_cols', default=st.session_state.get('input_cols', []))
+        st.multiselect("Columnas de Outputs", [c for c in df.columns.tolist() if c not in [st.session_state.dmu_col] + st.session_state.input_cols], key='output_cols', default=st.session_state.get('output_cols', []))
 
     if st.button("🚀 Ejecutar Análisis DEA", use_container_width=True):
         if not st.session_state.input_cols or not st.session_state.output_cols:
@@ -193,8 +196,16 @@ if st.session_state.get('app_status') == "results_ready" and st.session_state.ge
         if eee:
             st.metric(label="Puntuación EEE Total", value=f"{eee.get('score', 0):.4f}")
             with st.expander("Ver desglose y significado de la Métrica EEE"):
-                st.markdown("...") # El contenido del expander se mantiene
-    
+                st.markdown("""
+                El **Índice de Equilibrio Erotético (EEE)** mide la calidad y robustez del árbol de diagnóstico. Una puntuación más alta indica un análisis más completo.
+                """)
+                st.markdown("**D1: Profundidad del Análisis**")
+                st.progress(eee.get('D1', 0))
+                st.markdown("**D2: Pluralidad Semántica (Variedad de hipótesis)**")
+                st.progress(eee.get('D2', 0))
+                st.markdown("**D3: Trazabilidad del Razonamiento**")
+                st.progress(eee.get('D3', 0))
+
     st.header("Acciones", divider='rainbow')
     notes = st.text_area("Notas de la sesión")
     if st.button("💾 Guardar Sesión", use_container_width=True):
