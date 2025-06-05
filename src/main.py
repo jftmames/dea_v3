@@ -139,6 +139,41 @@ if 'df' in st.session_state and st.session_state.df is not None:
         if not st.session_state.input_cols or not st.session_state.output_cols:
             st.error("Por favor, selecciona al menos un input y un output.")
         else:
+            # --- 1. VALIDACIÓN DE DATOS ASISTIDA POR IA ---
+            with st.spinner("Validando datos y consultando asistente de IA..."):
+                validation_results = validate(df, st.session_state.input_cols, st.session_state.output_cols)
+            
+            formal_issues = validation_results.get("formal_issues", [])
+            llm_feedback = validation_results.get("llm", {})
+
+            if formal_issues:
+                st.error("Se encontraron problemas graves en los datos. Por favor, corrígelos antes de continuar.")
+                for issue in formal_issues:
+                    st.write(f"- {issue}")
+                st.stop()
+            
+            with st.expander("🔍 Ver Validación y Recomendaciones del Asistente de IA", expanded=True):
+                if not os.getenv("OPENAI_API_KEY"):
+                    st.warning("La validación con IA está desactivada. Añade tu API Key de OpenAI en los 'Secrets' de la app.")
+                elif llm_feedback:
+                    llm_issues = llm_feedback.get("issues", [])
+                    if llm_issues:
+                        st.warning("Potenciales problemas detectados por la IA:")
+                        for issue in llm_issues:
+                            st.write(f" - {issue}")
+                    
+                    llm_fixes = llm_feedback.get("suggested_fixes", [])
+                    if llm_fixes:
+                        st.info("Sugerencias de mejora:")
+                        for fix in llm_fixes:
+                            st.write(f" - {fix}")
+                    
+                    if not llm_issues and not llm_fixes:
+                        st.success("El asistente de IA no ha encontrado problemas en la selección de variables.")
+                else:
+                    st.error("No se pudo obtener respuesta del asistente de IA.")
+
+            # --- 2. ANÁLISIS DEA Y DELIBERATIVO ---
             with st.spinner("Realizando análisis completo..."):
                 st.session_state.dea_results = run_dea_analysis(df, st.session_state.dmu_col, st.session_state.input_cols, st.session_state.output_cols)
                 context = {"inputs": st.session_state.input_cols, "outputs": st.session_state.output_cols}
@@ -162,7 +197,7 @@ if st.session_state.get('app_status') == "results_ready" and st.session_state.ge
     if st.session_state.get('inquiry_tree'):
         st.header("Análisis Deliberativo Asistido por IA", divider='rainbow')
         st.subheader("🔬 Escenarios Interactivos del Complejo de Indagación")
-        st.info("Prueba el impacto de las recomendaciones de la IA. Selecciona un escenario para actualizar los inputs/outputs y vuelve a ejecutar el análisis.")
+        st.info("Estos botones representan las recomendaciones de la IA. Seleccióna un escenario para actualizar los inputs/outputs y vuelve a pulsar 'Ejecutar Análisis DEA' para ver el impacto.")
         
         main_hypotheses = list(st.session_state.inquiry_tree.get(list(st.session_state.inquiry_tree.keys())[0], {}).keys())
         cols = st.columns(len(main_hypotheses) or 1)
@@ -186,7 +221,8 @@ if st.session_state.get('app_status') == "results_ready" and st.session_state.ge
                     use_container_width=True,
                     on_click=apply_scenario,
                     args=(new_inputs, new_outputs),
-                    disabled=not can_apply
+                    disabled=not can_apply,
+                    help="Actualiza la selección de Inputs/Outputs de arriba con este escenario."
                 )
 
         st.subheader("🧠 Métrica de Calidad del Diagnóstico (EEE)")
@@ -195,7 +231,7 @@ if st.session_state.get('app_status') == "results_ready" and st.session_state.ge
             st.metric(label="Puntuación EEE Total", value=f"{eee.get('score', 0):.4f}")
             with st.expander("Ver desglose y significado de la Métrica EEE"):
                 st.markdown("""
-                El **Índice de Equilibrio Erotético (EEE)** mide la calidad y robustez del árbol de diagnóstico. Una puntuación más alta indica un análisis más completo.
+                El **Índice de Equilibrio Erotético (EEE)** mide la calidad del árbol de diagnóstico. Una puntuación alta indica un análisis más completo.
                 """)
                 st.markdown("**D1: Profundidad del Análisis**")
                 st.progress(eee.get('D1', 0))
@@ -206,6 +242,26 @@ if st.session_state.get('app_status') == "results_ready" and st.session_state.ge
 
     st.header("Acciones", divider='rainbow')
     notes = st.text_area("Notas de la sesión")
+    
     if st.button("💾 Guardar Sesión", use_container_width=True):
         st.success("¡Sesión guardada!")
         st.balloons()
+
+    st.subheader("Generar Reportes")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.download_button(
+            "Descargar HTML",
+            generate_html_report(results["df_ccr"], st.session_state.get('df_tree'), st.session_state.get('df_eee')),
+            f"reporte_dea.html",
+            "text/html",
+            use_container_width=True
+        )
+    with col2:
+        st.download_button(
+            "Descargar Excel",
+            generate_excel_report(results["df_ccr"], st.session_state.get('df_tree'), st.session_state.get('df_eee')),
+            f"reporte_dea.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
