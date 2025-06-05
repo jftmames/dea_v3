@@ -8,15 +8,7 @@ import plotly.graph_objects as go
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-FUNCTION_SPEC = {
-    "name": "return_tree",
-    "description": "Devuelve un árbol jerárquico de preguntas sobre las causas de la ineficiencia en un análisis DEA.",
-    "parameters": {
-        "type": "object",
-        "properties": {"tree": {"type": "object", "description": "Objeto JSON anidado representando el árbol de preguntas."}},
-        "required": ["tree"],
-    },
-}
+# Ya no necesitamos FUNCTION_SPEC al usar el Modo JSON
 
 def to_plotly_tree(tree: Dict[str, Any], title: str = "Árbol de Indagación") -> go.Figure:
     """Convierte un diccionario anidado en un Treemap de Plotly."""
@@ -45,55 +37,55 @@ def to_plotly_tree(tree: Dict[str, Any], title: str = "Árbol de Indagación") -
 def generate_inquiry(
     root_question: str,
     context: Optional[Dict[str, Any]] = None,
-    max_retries: int = 2
+    max_retries: int = 1 # Reducimos a 1 reintento, ya que el modo JSON es muy fiable
 ) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """
-    Genera un árbol de preguntas usando el LLM, con un bucle de reintentos para mayor fiabilidad.
+    Genera un árbol de preguntas usando el LLM en Modo JSON para máxima fiabilidad.
     """
     ctx_str = json.dumps(context, indent=2) if context else "{}"
     
-    base_prompt = (
+    prompt = (
         "Eres un experto mundial en Análisis Envolvente de Datos (DEA). "
         "Tu tarea es generar un árbol de hipótesis en formato JSON sobre las causas de la ineficiencia, basándote en un contexto.\n\n"
         f"--- CONTEXTO ---\n{ctx_str}\n\n"
         f"--- PREGUNTA RAÍZ ---\n{root_question}\n\n"
         "--- INSTRUCCIONES ESTRICTAS ---\n"
-        "1. Descompón la pregunta en un árbol jerárquico de hipótesis con 2-3 niveles.\n"
-        "2. Tu única salida DEBE SER una llamada a la función `return_tree` con el objeto JSON del árbol.\n"
-        "3. NO escribas ningún texto o explicación. Solo llama a la función `return_tree`."
+        "1. Tu única y exclusiva salida DEBE SER un objeto JSON válido.\n"
+        "2. El JSON debe tener una única clave raíz llamada 'tree', cuyo valor es el árbol de hipótesis (un objeto JSON anidado).\n"
+        "3. NO escribas ningún texto, explicación, saludo o markdown. Tu respuesta debe ser únicamente el JSON.\n"
+        "4. El árbol debe tener 2-3 niveles. Las claves del primer nivel deben ser las hipótesis principales (ej. 'Uso excesivo de recursos')."
     )
 
     for attempt in range(max_retries + 1):
-        prompt = base_prompt
         if attempt > 0:
-            prompt += "\n\n--- AVISO ---\nTu intento anterior no produjo el formato correcto. Es crucial que tu única respuesta sea la llamada a la función `return_tree` con el JSON. No generes texto."
-            print(f"--- DEBUG: Reintentando la llamada al motor de indagación (Intento {attempt + 1}) ---")
+            print(f"--- DEBUG: La IA no devolvió un JSON con la clave 'tree'. Reintentando (Intento {attempt + 1}) ---")
+            time.sleep(1)
         
         try:
             resp = client.chat.completions.create(
                 model="gpt-4o",
                 messages=[{"role": "user", "content": prompt}],
-                tools=[{"type": "function", "function": FUNCTION_SPEC}],
-                tool_choice={"type": "function", "function": {"name": "return_tree"}},
-                temperature=0.4 + (attempt * 0.1), # Aumenta la temperatura en cada reintento
+                response_format={"type": "json_object"}, # <- LA CLAVE DE LA SOLUCIÓN
+                temperature=0.2 + (attempt * 0.2), 
             )
             
-            if resp.choices[0].message.tool_calls:
-                args = resp.choices[0].message.tool_calls[0].function.arguments
-                tree = json.loads(args).get("tree", {})
-                if tree: 
-                    print("--- DEBUG: Árbol de indagación generado por la IA con éxito. ---")
-                    return {root_question: tree}, None # Éxito
+            # La API garantiza que 'content' es un string JSON válido
+            response_json = json.loads(resp.choices[0].message.content)
+            tree = response_json.get("tree", {})
+            
+            if tree: 
+                print("--- DEBUG: Árbol de indagación generado por la IA con éxito usando Modo JSON. ---")
+                return {root_question: tree}, None # Éxito
 
         except Exception as e:
             print(f"--- DEBUG: Error en la API de OpenAI en el intento {attempt + 1}: {e} ---")
             if attempt >= max_retries:
                 return None, f"Fallo la conexión con la API de OpenAI tras {max_retries+1} intentos. Detalle: {e}"
-            time.sleep(1) # Esperar 1 segundo antes de reintentar
+            time.sleep(1)
 
     # Si todos los reintentos fallan, entonces usamos el árbol de respaldo
-    print("--- DEBUG: La IA no devolvió un árbol válido tras todos los reintentos. Usando árbol de respaldo. ---")
-    return _fallback_tree(root_question), "La IA no devolvió un árbol válido después de varios intentos. Usando árbol de respaldo."
+    print("--- DEBUG: La IA no devolvió un JSON con la clave 'tree' tras todos los reintentos. Usando árbol de respaldo. ---")
+    return _fallback_tree(root_question), "La IA no generó un árbol con la estructura esperada. Usando árbol de respaldo."
 
 
 def _fallback_tree(root_q: str) -> Dict[str, Any]:
