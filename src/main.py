@@ -53,7 +53,7 @@ if 'app_status' not in st.session_state:
 def run_dea_analysis(_df, dmu_col, input_cols, output_cols):
     """Encapsula los cálculos DEA para ser cacheados."""
     if not input_cols or not output_cols:
-        return None # Evita correr el análisis si no hay inputs/outputs
+        return None
     return mostrar_resultados(_df.copy(), dmu_col, input_cols, output_cols)
 
 @st.cache_data
@@ -121,6 +121,12 @@ if uploaded_file is not None:
 if 'df' in st.session_state and st.session_state.df is not None:
     df = st.session_state.df
     st.subheader("Configuración del Análisis")
+    
+    # --- Callback para actualizar la selección de inputs/outputs ---
+    def apply_scenario(new_inputs, new_outputs):
+        st.session_state.input_cols = new_inputs
+        st.session_state.output_cols = new_outputs
+
     col1, col2 = st.columns(2)
     with col1:
         st.selectbox("Columna de DMU", df.columns.tolist(), key='dmu_col', index=0)
@@ -155,44 +161,40 @@ if st.session_state.get('app_status') == "results_ready" and st.session_state.ge
     if st.session_state.get('inquiry_tree'):
         st.header("Análisis Deliberativo Asistido por IA", divider='rainbow')
         st.subheader("🔬 Escenarios Interactivos del Complejo de Indagación")
-        st.info("Prueba el impacto de las recomendaciones de la IA. Selecciona un escenario para re-ejecutar el análisis.")
+        st.info("Prueba el impacto de las recomendaciones de la IA. Selecciona un escenario para actualizar los inputs/outputs y vuelve a ejecutar el análisis.")
+        
         main_hypotheses = list(st.session_state.inquiry_tree.get(list(st.session_state.inquiry_tree.keys())[0], {}).keys())
         cols = st.columns(len(main_hypotheses) or 1)
+        
         for i, hypothesis in enumerate(main_hypotheses):
-            with cols[i]:
-                if st.button(hypothesis, use_container_width=True, key=f"hyp_{i}"):
-                    with st.spinner("Re-calculando escenario..."):
-                        # Lógica robusta para modificar inputs/outputs
-                        original_inputs = st.session_state.input_cols.copy()
-                        original_outputs = st.session_state.output_cols.copy()
-                        
-                        if "input" in hypothesis.lower() and len(original_inputs) > 1:
-                            removed_var = original_inputs.pop(0)
-                            st.info(f"Escenario: Sin el input '{removed_var}'")
-                        elif "output" in hypothesis.lower() and len(original_outputs) > 1:
-                            removed_var = original_outputs.pop(0)
-                            st.info(f"Escenario: Sin el output '{removed_var}'")
-                        else:
-                            st.warning("El escenario no se puede aplicar (requiere al menos 2 inputs/outputs para eliminar uno).")
-                        
-                        # Guardar los inputs/outputs del escenario en el estado de sesión
-                        st.session_state.input_cols = original_inputs
-                        st.session_state.output_cols = original_outputs
+            new_inputs = st.session_state.input_cols.copy()
+            new_outputs = st.session_state.output_cols.copy()
+            can_apply = False
 
-                        # Recalcular AMBOS, el análisis DEA y el deliberativo
-                        st.session_state.dea_results = run_dea_analysis(st.session_state.df, st.session_state.dmu_col, st.session_state.input_cols, st.session_state.output_cols)
-                        context = {"inputs": st.session_state.input_cols, "outputs": st.session_state.output_cols}
-                        df_hash = pd.util.hash_pandas_object(st.session_state.df).sum() # Usar el mismo hash
-                        st.session_state.inquiry_tree, st.session_state.eee_metrics = get_inquiry_and_eee("Diagnóstico de ineficiencia", context, df_hash)
-                    st.rerun()
+            if "input" in hypothesis.lower() and len(new_inputs) > 1:
+                new_inputs.pop(0)
+                can_apply = True
+            elif "output" in hypothesis.lower() and len(new_outputs) > 1:
+                new_outputs.pop(0)
+                can_apply = True
+            
+            with cols[i]:
+                st.button(
+                    hypothesis,
+                    key=f"hyp_{i}",
+                    use_container_width=True,
+                    on_click=apply_scenario,
+                    args=(new_inputs, new_outputs),
+                    disabled=not can_apply
+                )
 
         st.subheader("🧠 Métrica de Calidad del Diagnóstico (EEE)")
         eee = st.session_state.get('eee_metrics')
         if eee:
             st.metric(label="Puntuación EEE Total", value=f"{eee.get('score', 0):.4f}")
             with st.expander("Ver desglose y significado de la Métrica EEE"):
-                st.markdown("...") # Contenido del expander...
-
+                st.markdown("...") # El contenido del expander se mantiene
+    
     st.header("Acciones", divider='rainbow')
     notes = st.text_area("Notas de la sesión")
     if st.button("💾 Guardar Sesión", use_container_width=True):
