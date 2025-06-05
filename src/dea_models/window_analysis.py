@@ -1,9 +1,8 @@
-# src/dea_models/window_analysis.py
-
+# jftmames/-dea-deliberativo-mvp/-dea-deliberativo-mvp-b44b8238c978ae0314af30717b9399634d28f8f9/src/dea_models/window_analysis.py
 import pandas as pd
 import numpy as np
 
-from .radial import run_ccr   
+from .radial import run_ccr, run_bcc
 from .utils import validate_dataframe
 
 def run_window_dea(
@@ -13,63 +12,68 @@ def run_window_dea(
     input_cols: list[str],
     output_cols: list[str],
     window_size: int = 3,
-    step: int = 1,
-    rts: str = "CRS"
+    rts: str = "CRS" # Se pasa a run_ccr o run_bcc
 ) -> pd.DataFrame:
     """
-    Corre DEA sobre ventanas temporales consecutivas.
-    - df_panel: DataFrame con columnas [dmu_column, period_column, inputs…, outputs…].
-    - window_size: número de períodos por ventana.
-    - step: desplazamiento entre ventanas.
-    - rts: "CRS" o "VRS" (se pasa luego a run_ccr).
-    Retorna DataFrame con columnas:
-      DMU, start_period, end_period, efficiency_window.
+    Corre DEA sobre ventanas temporales deslizantes.
     """
-    # 1) Validar que exista la columna DMU y la de período
-    if dmu_column not in df_panel.columns:
-        raise ValueError(f"La columna DMU '{dmu_column}' no existe en el DataFrame.")
-    if period_column not in df_panel.columns:
-        raise ValueError(f"La columna de periodo '{period_column}' no existe en el DataFrame.")
-
-    # 2) Validar positividad en inputs/outputs
+    if dmu_column not in df_panel.columns or period_column not in df_panel.columns:
+        raise ValueError("Las columnas de DMU y período deben existir.")
     validate_dataframe(df_panel, input_cols, output_cols, allow_zero=False, allow_negative=False)
 
-    # 3) Lista de períodos ordenada
     periods = sorted(df_panel[period_column].unique())
     if len(periods) < window_size:
         raise ValueError("No hay suficientes períodos para la ventana solicitada.")
 
-    registros = []
+    all_results = []
 
-    # 4) Iterar ventanas (start_idx: 0 → len(periods)-window_size, paso=step)
-    for start_idx in range(0, len(periods) - window_size + 1, step):
-        start_p = periods[start_idx]
-        end_p = periods[start_idx + window_size - 1]
+    for i in range(len(periods) - window_size + 1):
+        current_window_periods = periods[i : i + window_size]
+        start_p, end_p = current_window_periods[0], current_window_periods[-1]
+        
+        # --- CORRECCIÓN LÓGICA ---
+        # El DataFrame de referencia debe ser toda la ventana.
+        # Las DMUs a evaluar son las del último período de la ventana.
+        df_window = df_panel[df_panel[period_column].isin(current_window_periods)].copy()
+        
+        # Para evitar conflictos con nombres de DMU repetidos en distintos períodos,
+        # creamos un ID temporal único para el cálculo.
+        df_window['temp_dmu_id'] = df_window[dmu_column].astype(str) + " | P:" + df_window[period_column].astype(str)
+        
+        model_func = run_ccr if rts == "CRS" else run_bcc
+        
+        # Para BCC, necesitamos resultados de CCR para la eficiencia de escala
+        df_ccr_results = run_ccr(
+            df=df_window,
+            dmu_column='temp_dmu_id',
+            input_cols=input_cols,
+            output_cols=output_cols
+        )
+        # Renombramos columna para que run_bcc la encuentre
+        df_ccr_results = df_ccr_results.rename(columns={'tec_efficiency_ccr': 'efficiency'})
 
-        df_window = df_panel[df_panel[period_column].isin(periods[start_idx : start_idx + window_size])]
 
-        df_snapshot = df_window[df_window[period_column] == end_p].copy()
-        if df_snapshot.empty:
-            continue
-
-        try:
-            df_eff = run_ccr( # Run CCR for this snapshot
-                df=df_snapshot,
-                dmu_column=dmu_column,
+        if rts == "CRS":
+            df_eff = df_ccr_results.rename(columns={'efficiency':'tec_efficiency_ccr'})
+        else:
+             df_eff = run_bcc(
+                df=df_window,
+                dmu_column='temp_dmu_id',
                 input_cols=input_cols,
                 output_cols=output_cols,
-                orientation="input", # assuming input-oriented for simplicity or based on CCR default
-                super_eff=False
+                df_ccr_results=df_ccr_results
             )
-        except Exception as e:
-            raise RuntimeError(f"Error al correr run_ccr para ventana {start_p}–{end_p}: {e}")
 
-        for _, row in df_eff.iterrows():
-            registros.append({
-                dmu_column: row[dmu_column],
+        # Filtramos para quedarnos solo con los resultados del último período de la ventana
+        results_end_period = df_eff[df_eff['temp_dmu_id'].str.contains(f"P:{end_p}")]
+
+        for _, row in results_end_period.iterrows():
+            original_dmu = row['temp_dmu_id'].split(" | P:")[0]
+            all_results.append({
+                "DMU": original_dmu,
                 "start_period": start_p,
                 "end_period": end_p,
-                "efficiency_window": row["efficiency"]
+                "efficiency_window": row['tec_efficiency_ccr'] if rts == "CRS" else row['efficiency']
             })
 
-    return pd.DataFrame(registros)
+    return pd.DataFrame(all_results)
