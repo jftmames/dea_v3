@@ -41,7 +41,7 @@ def initialize_state():
     st.session_state.inquiry_tree = None
     st.session_state.eee_metrics = None
     st.session_state.model_selection = 'CCR (Constantes)'
-    st.session_state.orientation_selection = 'Input (Minimizar insumos)'
+    st.session_state.orientation_selection = 'Input (Minimizar)'
 
 if 'app_status' not in st.session_state:
     initialize_state()
@@ -92,19 +92,27 @@ if uploaded_file is not None:
 
 if 'df' in st.session_state and st.session_state.df is not None:
     df = st.session_state.df
+    
+    # --- FUNCIÓN DE CALLBACK PARA RESETEAR EL ESTADO ---
+    def reset_analysis_state():
+        st.session_state.app_status = "initial"
+        st.session_state.dea_results = None
+        st.session_state.inquiry_tree = None
+        st.session_state.eee_metrics = None
+    
     st.subheader("Configuración del Análisis")
     
     col_config, col_inputs, col_outputs = st.columns(3)
     with col_config:
         dmu_col_index = df.columns.tolist().index(st.session_state.get('dmu_col')) if st.session_state.get('dmu_col') in df.columns else 0
-        st.selectbox("Columna de DMU (Unidad de Análisis)", df.columns.tolist(), key='dmu_col', index=dmu_col_index)
-        st.radio("Tipo de Modelo", ['CCR (Constantes)', 'BCC (Variables)'], key='model_selection', horizontal=True)
-        st.radio("Orientación del Modelo", ['Input (Minimizar)', 'Output (Maximizar)'], key='orientation_selection', horizontal=True)
+        st.selectbox("Columna de DMU (Unidad de Análisis)", df.columns.tolist(), key='dmu_col', index=dmu_col_index, on_change=reset_analysis_state)
+        st.radio("Tipo de Modelo", ['CCR (Constantes)', 'BCC (Variables)'], key='model_selection', horizontal=True, on_change=reset_analysis_state)
+        st.radio("Orientación del Modelo", ['Input (Minimizar)', 'Output (Maximizar)'], key='orientation_selection', horizontal=True, on_change=reset_analysis_state)
         
     with col_inputs:
-        st.multiselect("Columnas de Inputs", [c for c in df.columns.tolist() if c != st.session_state.dmu_col], key='input_cols')
+        st.multiselect("Columnas de Inputs", [c for c in df.columns.tolist() if c != st.session_state.dmu_col], key='input_cols', on_change=reset_analysis_state)
     with col_outputs:
-        st.multiselect("Columnas de Outputs", [c for c in df.columns.tolist() if c not in [st.session_state.dmu_col] + st.session_state.input_cols], key='output_cols')
+        st.multiselect("Columnas de Outputs", [c for c in df.columns.tolist() if c not in [st.session_state.dmu_col] + st.session_state.input_cols], key='output_cols', on_change=reset_analysis_state)
 
     if st.button("🚀 Ejecutar Análisis DEA", use_container_width=True):
         if not st.session_state.input_cols or not st.session_state.output_cols:
@@ -142,8 +150,12 @@ if st.session_state.get('app_status') == "results_ready" and st.session_state.ge
         st.plotly_chart(results['scatter_3d'], use_container_width=True)
         
     st.subheader(f"🕷️ Benchmark Spider ({model_ran})")
-    dmu_options = results["df_results"][st.session_state.dmu_col].astype(str).tolist()
-    selected_dmu = st.selectbox("Seleccionar DMU para comparar:", options=dmu_options, key=f"dmu_{model_ran.lower()}")
-    if selected_dmu:
-        spider_fig = plot_benchmark_spider(results["merged_df"], selected_dmu, st.session_state.input_cols, st.session_state.output_cols)
-        st.plotly_chart(spider_fig, use_container_width=True)
+    # Se usa .get() para acceder de forma segura a la columna, aunque el error de estado ya está resuelto.
+    dmu_list = results["df_results"].get(st.session_state.dmu_col, pd.Series([])).astype(str).tolist()
+    if dmu_list:
+        selected_dmu = st.selectbox("Seleccionar DMU para comparar:", options=dmu_list, key=f"dmu_{model_ran.lower()}")
+        if selected_dmu:
+            spider_fig = plot_benchmark_spider(results["merged_df"], selected_dmu, st.session_state.input_cols, st.session_state.output_cols)
+            st.plotly_chart(spider_fig, use_container_width=True)
+    else:
+        st.warning("No se pudo generar la lista de DMUs para el gráfico de araña.")
