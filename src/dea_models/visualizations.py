@@ -1,110 +1,123 @@
-# src/dea_models/visualizations.py
 import pandas as pd
+import numpy as np
 import plotly.express as px
-import matplotlib.pyplot as plt 
+import plotly.graph_objects as go
 
-def plot_benchmark_spider(
-    merged_for_spider: pd.DataFrame,
-    selected_dmu: str,
-    inputs: list[str],
-    outputs: list[str],
-):
+def plot_efficiency_histogram(df_eff: pd.DataFrame, eff_col: str, title: str = "Efficiency Histogram"):
     """
-    Radar/spider plot comparando la DMU seleccionada vs. la media de DMUs eficientes.
-    merged_for_spider: DataFrame con columnas 'DMU', inputs, outputs y 'efficiency'.
-    selected_dmu: identificador de la DMU a plotear.
-    inputs: lista de columnas de insumo
-    outputs: lista de columnas de producto
+    df_eff: DataFrame que contiene una columna con eficiencias (por ejemplo, "efficiency" o "tec_efficiency_ccr")
+    eff_col: nombre de la columna de eficiencias dentro de df_eff
+    title: título para la gráfica
+    Devuelve una figura de Plotly Express (histograma).
     """
-    # Filtrar DMUs eficientes (efficiency == 1)
-    efficient_peers = merged_for_spider.query("efficiency == 1")
-    if efficient_peers.empty:
-        raise ValueError("No hay DMU eficientes para benchmark.")
+    if eff_col not in df_eff.columns:
+        # Devolvemos un histograma vacío
+        return px.histogram(pd.DataFrame({eff_col: []}), x=eff_col, title=title)
 
-    # Variables a comparar
-    vars_all = inputs + outputs
-    peer_means = efficient_peers[vars_all].mean()
+    fig = px.histogram(df_eff, x=eff_col, nbins=20, title=title)
+    fig.update_layout(xaxis_title="Eficiencia", yaxis_title="Frecuencia")
+    return fig
 
-    # Valores de la DMU seleccionada
-    sel_row = merged_for_spider.loc[merged_for_spider["DMU"] == selected_dmu]
-    if sel_row.empty:
-        raise ValueError(f"No existe la DMU '{selected_dmu}' en merged_for_spider.")
-    sel_values = sel_row.iloc[0][vars_all]
+def plot_benchmark_spider(df_merged: pd.DataFrame, selected_dmu: str, input_cols: list[str], output_cols: list[str]):
+    """
+    df_merged: DataFrame que resulta de hacer merge(df_ccr, df_original, on=dmu_col)
+               Debe contener al menos: dmu_col, columnas de inputs, columnas de outputs, y efﬁciencia (“tec_efficiency_ccr”).
+    selected_dmu: cadena con el ID de la DMU a graficar
+    input_cols: lista de nombres de columnas de inputs
+    output_cols: lista de nombres de columnas de outputs
 
-    # Cerrar ciclo para radar
-    categories = vars_all + [vars_all[0]]
-    peer_vals = peer_means.tolist() + [peer_means.tolist()[0]]
-    sel_vals = sel_values.tolist() + [sel_values.tolist()[0]]
+    Lo que hace:
+      - Identifica los peers eficientes (donde tec_efficiency_ccr == 1.0)
+      - Calcula el promedio de inputs y outputs de esos peers
+      - Construye un radar chart comparando “selected_dmu” vs “peers promedio”
+    Devuelve un objeto de Plotly Graph Objects.
+    """
 
-    # Construir DataFrame para Plotly
-    df_spider = pd.DataFrame({
-        "variable": categories * 2,
-        "valor": peer_vals + sel_vals,
-        "tipo": ["Peer (medio)"] * len(categories) + [f"DMU {selected_dmu}"] * len(categories),
+    # 1) Filtrar solo la DMU seleccionada
+    if selected_dmu not in df_merged[df_merged.columns[0]].astype(str).tolist():
+        # Si la DMU no existe, devolvemos un gráfico vacío
+        df_empty = pd.DataFrame({ "variable": [], "valor_dmu": [], "valor_peers": [] })
+        return px.line_polar(df_empty, r="valor_dmu", theta="variable", line_close=True, title="Sin datos")
+
+    # 2) Identificar peers eficientes
+    # Suponemos que la columna de eficiencia se llama “tec_efficiency_ccr”
+    peers = df_merged[df_merged["tec_efficiency_ccr"] == 1.0]
+    if peers.empty:
+        # Si no hay peers eficientes, devolvemos también vacío
+        df_empty = pd.DataFrame({ "variable": [], "valor_dmu": [], "valor_peers": [] })
+        return px.line_polar(df_empty, r="valor_dmu", theta="variable", line_close=True, title="Sin peers eficientes")
+
+    # 3) Extraer valores de la DMU seleccionada
+    dmu_row = df_merged[df_merged[df_merged.columns[0]].astype(str) == selected_dmu].iloc[0]
+
+    # 4) Calcular promedio de peers eficientes para cada columna de input/output
+    peers_avg = peers[input_cols + output_cols].mean()
+
+    # 5) Preparar DataFrame para el radar
+    variables = input_cols + output_cols
+    valores_dmu = [float(dmu_row[col]) for col in variables]
+    valores_peers = [float(peers_avg[col]) for col in variables]
+
+    df_radar = pd.DataFrame({
+        "variable": variables * 2,
+        "valor": valores_dmu + valores_peers,
+        "grupo": [f"DMU {selected_dmu}"] * len(variables) + ["Peers promedio"] * len(variables)
     })
 
     fig = px.line_polar(
-        df_spider,
+        df_radar,
         r="valor",
         theta="variable",
-        color="tipo",
+        color="grupo",
         line_close=True,
-        title=f"Benchmark Spider: DMU {selected_dmu} vs. Promedio de Peers Eficientes",
+        title=f"Benchmark Spider: {selected_dmu} vs Peers eficaces"
     )
-    fig.update_layout(
-        polar=dict(radialaxis=dict(visible=True)),
-        margin=dict(l=40, r=40, t=40, b=40),
-    )
+    fig.update_traces(fill="toself")
     return fig
 
-def plot_slack_waterfall(
-    slacks_in: dict[str, float],
-    slacks_out: dict[str, float],
-    dmu_name: str
-):
+def plot_3d_inputs_outputs(df_eff: pd.DataFrame, input_cols: list[str], output_cols: list[str], color_col: str = None):
     """
-    Dibuja un gráfico de cascada:
-      - Inputs con slack positivo (exceso) como barras negativas.
-      - Outputs con slack positivo (escasez) como barras positivas.
-    slacks_in: dict {input_var: slack_value}
-    slacks_out: dict {output_var: slack_value}
-    dmu_name: nombre de la DMU para título.
+    df_eff: DataFrame que contiene resultados (por ejemplo df_ccr) con al menos:
+            - columnas de inputs (input_cols)
+            - columnas de outputs (output_cols)
+            - una columna de color (color_col), opcional (por ejemplo, “tec_efficiency_ccr”)
+    input_cols: lista de al menos 2 nombres de columnas de inputs
+    output_cols: lista de al menos 1 nombre de columna de outputs
+    color_col: (opcional) nombre de columna que usaremos para el color
+    Devuelve un scatter 3D de Plotly Express.
     """
-    categories = list(slacks_in.keys()) + list(slacks_out.keys())
-    values = [-slacks_in[k] for k in slacks_in] + [slacks_out[k] for k in slacks_out]
 
-    non_zero_slacks = [(cat, val) for cat, val in zip(categories, values) if val != 0]
-    
-    if not non_zero_slacks:
-        fig, ax = plt.subplots(figsize=(8, 4))
-        ax.text(0.5, 0.5, f"No slacks to display for DMU {dmu_name}", 
-                horizontalalignment='center', verticalalignment='center', 
-                transform=ax.transAxes)
-        ax.set_title(f"Waterfall de slacks para DMU {dmu_name}")
-        ax.set_xticks([])
-        ax.set_yticks([])
-        return fig
+    # Validaciones mínimas
+    if len(input_cols) < 2 or len(output_cols) < 1:
+        # Gráfico vacío
+        return px.scatter_3d(
+            pd.DataFrame({input_cols[0]: [], input_cols[1]: [], output_cols[0]: []}),
+            x=input_cols[0], y=input_cols[1], z=output_cols[0],
+            title="No hay suficientes columnas para Scatter 3D"
+        )
 
-    categories_plot = [item[0] for item in non_zero_slacks]
-    values_plot = [item[1] for item in non_zero_slacks]
-    
-    fig, ax = plt.subplots(figsize=(max(8, len(categories_plot) * 0.8), 6)) 
-    
-    start = 0
-    for cat, val in zip(categories_plot, values_plot):
-        color = "C0" if val >= 0 else "C1" 
-        ax.bar(cat, val, bottom=start, color=color, label=f'{cat}: {val:.2f}')
-        start += val 
+    # Tomamos las primeras dos columnas de inputs y la primera de outputs
+    x_col = input_cols[0]
+    y_col = input_cols[1]
+    z_col = output_cols[0]
 
-    ax.axhline(0, color="black", linewidth=0.8)
-    ax.set_title(f"Waterfall de slacks para DMU {dmu_name}")
-    ax.set_ylabel("Magnitud del Slack (Outputs: positivo = shortfall, Inputs: negativo = excess)")
-    plt.xticks(rotation=45, ha="right")
-    plt.tight_layout()
-    
-    import matplotlib.patches as mpatches
-    red_patch = mpatches.Patch(color='C1', label='Exceso de Input (Reducción Sugerida)')
-    blue_patch = mpatches.Patch(color='C0', label='Escasez de Output (Aumento Sugerido)')
-    ax.legend(handles=[red_patch, blue_patch])
-
+    if color_col and color_col in df_eff.columns:
+        fig = px.scatter_3d(
+            df_eff,
+            x=x_col,
+            y=y_col,
+            z=z_col,
+            color=color_col,
+            hover_data=[x_col, y_col, z_col, color_col],
+            title="Scatter 3D Inputs vs Output"
+        )
+    else:
+        fig = px.scatter_3d(
+            df_eff,
+            x=x_col,
+            y=y_col,
+            z=z_col,
+            hover_data=[x_col, y_col, z_col],
+            title="Scatter 3D Inputs vs Output"
+        )
     return fig
