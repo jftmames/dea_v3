@@ -129,11 +129,9 @@ if 'df' in st.session_state and st.session_state.df is not None:
 
     col1, col2 = st.columns(2)
     with col1:
-        # Usamos .get() para seguridad, aunque initialize_state() ya lo asegura
         dmu_col_index = df.columns.tolist().index(st.session_state.get('dmu_col')) if st.session_state.get('dmu_col') in df.columns else 0
         st.selectbox("Columna de DMU", df.columns.tolist(), key='dmu_col', index=dmu_col_index)
     with col2:
-        # **LA CORRECCIÓN CLAVE ESTÁ AQUÍ: Añadido el parámetro 'default'**
         st.multiselect("Columnas de Inputs", [c for c in df.columns.tolist() if c != st.session_state.dmu_col], key='input_cols', default=st.session_state.get('input_cols', []))
         st.multiselect("Columnas de Outputs", [c for c in df.columns.tolist() if c not in [st.session_state.dmu_col] + st.session_state.input_cols], key='output_cols', default=st.session_state.get('output_cols', []))
 
