@@ -17,6 +17,7 @@ if script_dir not in sys.path:
 from data_validator import validate
 from results import mostrar_resultados
 from report_generator import generate_html_report, generate_excel_report
+# Se eliminan las importaciones de session_manager
 from inquiry_engine import generate_inquiry, to_plotly_tree
 from epistemic_metrics import compute_eee
 from dea_models.visualizations import plot_benchmark_spider, plot_efficiency_histogram, plot_3d_inputs_outputs
@@ -39,29 +40,27 @@ def initialize_state():
     st.session_state.dea_results = None
     st.session_state.inquiry_tree = None
     st.session_state.eee_metrics = None
-    st.session_state.openai_error = None # Nuevo estado para guardar errores
+    st.session_state.model_selection = 'CCR (Constantes)'
+    st.session_state.orientation_selection = 'Input (Minimizar insumos)'
 
 if 'app_status' not in st.session_state:
     initialize_state()
 
 @st.cache_data
-def run_dea_analysis(_df, dmu_col, input_cols, output_cols):
+def run_dea_analysis(_df, dmu_col, input_cols, output_cols, model_type, orientation):
     """Encapsula los cálculos DEA para ser cacheados."""
-    return mostrar_resultados(_df.copy(), dmu_col, input_cols, output_cols)
+    if not input_cols or not output_cols:
+        return None
+    return mostrar_resultados(_df.copy(), dmu_col, input_cols, output_cols, model_type, orientation)
 
 @st.cache_data
 def get_inquiry_and_eee(_root_q, _context, _df_hash):
-    """Encapsula las llamadas al LLM y EEE, y devuelve el error si lo hay."""
+    """Encapsula las llamadas al LLM y EEE para ser cacheados."""
     if not os.getenv("OPENAI_API_KEY"):
-        return None, None, "La clave API de OpenAI no está configurada en los Secrets de la aplicación."
-    
+        return None, {"score": 0, "D1": 0, "D2": 0, "D3": 0, "D4": 0, "D5": 0}, "OPENAI_API_KEY no configurada."
     inquiry_tree, error_msg = generate_inquiry(_root_q, context=_context)
-    
     if error_msg and not inquiry_tree:
-        # Si hay un error fatal que impide generar cualquier árbol
         return None, None, error_msg
-    
-    # Si hay un árbol (incluso el de respaldo), calcula EEE y pasa el mensaje de advertencia si existe
     eee_metrics = compute_eee(inquiry_tree, depth_limit=5, breadth_limit=5)
     return inquiry_tree, eee_metrics, error_msg
 
@@ -95,59 +94,56 @@ if 'df' in st.session_state and st.session_state.df is not None:
     df = st.session_state.df
     st.subheader("Configuración del Análisis")
     
-    def apply_scenario(new_inputs, new_outputs):
-        st.session_state.input_cols = new_inputs
-        st.session_state.output_cols = new_outputs
-
-    col1, col2 = st.columns(2)
-    with col1:
+    col_config, col_inputs, col_outputs = st.columns(3)
+    with col_config:
         dmu_col_index = df.columns.tolist().index(st.session_state.get('dmu_col')) if st.session_state.get('dmu_col') in df.columns else 0
-        st.selectbox("Columna de DMU", df.columns.tolist(), key='dmu_col', index=dmu_col_index)
-    with col2:
+        st.selectbox("Columna de DMU (Unidad de Análisis)", df.columns.tolist(), key='dmu_col', index=dmu_col_index)
+        st.radio("Tipo de Modelo", ['CCR (Constantes)', 'BCC (Variables)'], key='model_selection', horizontal=True)
+        st.radio("Orientación del Modelo", ['Input (Minimizar)', 'Output (Maximizar)'], key='orientation_selection', horizontal=True)
+        
+    with col_inputs:
         st.multiselect("Columnas de Inputs", [c for c in df.columns.tolist() if c != st.session_state.dmu_col], key='input_cols')
+    with col_outputs:
         st.multiselect("Columnas de Outputs", [c for c in df.columns.tolist() if c not in [st.session_state.dmu_col] + st.session_state.input_cols], key='output_cols')
 
     if st.button("🚀 Ejecutar Análisis DEA", use_container_width=True):
         if not st.session_state.input_cols or not st.session_state.output_cols:
             st.error("Por favor, selecciona al menos un input y un output.")
         else:
-            with st.spinner("Realizando análisis completo..."):
-                st.session_state.dea_results = run_dea_analysis(df, st.session_state.dmu_col, st.session_state.input_cols, st.session_state.output_cols)
-                context = {"inputs": st.session_state.input_cols, "outputs": st.session_state.output_cols}
-                df_hash = pd.util.hash_pandas_object(df).sum()
-                
-                # Capturar los 3 valores de retorno
-                tree, eee, error = get_inquiry_and_eee("Diagnóstico de ineficiencia", context, df_hash)
-                st.session_state.inquiry_tree = tree
-                st.session_state.eee_metrics = eee
-                st.session_state.openai_error = error # Guardar el mensaje de error/advertencia
+            model_map = {'CCR (Constantes)': 'CCR', 'BCC (Variables)': 'BCC'}
+            orientation_map = {'Input (Minimizar)': 'input', 'Output (Maximizar)': 'output'}
+            
+            selected_model = model_map[st.session_state.model_selection]
+            selected_orientation = orientation_map[st.session_state.orientation_selection]
 
+            with st.spinner("Realizando análisis..."):
+                st.session_state.dea_results = run_dea_analysis(
+                    df, st.session_state.dmu_col, st.session_state.input_cols, st.session_state.output_cols,
+                    selected_model, selected_orientation
+                )
                 st.session_state.app_status = "results_ready"
             st.success("Análisis completado.")
 
 # --- Mostrar resultados ---
 if st.session_state.get('app_status') == "results_ready" and st.session_state.get('dea_results'):
     results = st.session_state.dea_results
-    st.header("Resultados del Análisis DEA", divider='rainbow')
+    model_ran = results['model_type']
     
-    # ... (código para mostrar las pestañas CCR/BCC y los gráficos DEA se mantiene igual) ...
-
-    # --- SECCIÓN DE ANÁLISIS DELIBERATIVO MEJORADA ---
-    st.header("Análisis Deliberativo Asistido por IA", divider='rainbow')
-
-    # Mostrar error de OpenAI si existe
-    if st.session_state.get('openai_error'):
-        # Distinguir entre un error fatal y una advertencia
-        if "usando árbol de respaldo" in st.session_state.openai_error:
-            st.warning(f"**Advertencia en el Análisis Deliberativo:** {st.session_state.openai_error}")
-        else:
-            st.error(f"**Error en el Análisis Deliberativo:** {st.session_state.openai_error}")
-        st.info("Si el error persiste, comprueba tu API Key de OpenAI, que tenga crédito y que el servicio de OpenAI esté operativo.")
-
-    # Mostrar el resto solo si el árbol existe (incluyendo el de respaldo)
-    if st.session_state.get('inquiry_tree'):
-        st.subheader("🔬 Escenarios Interactivos del Complejo de Indagación")
-        # ... (El código de los escenarios se mantiene igual)
+    st.header(f"Resultados del Análisis {model_ran}", divider='rainbow')
+    
+    st.subheader(f"📊 Tabla de Eficiencias ({model_ran})")
+    st.dataframe(results["df_results"])
+    
+    st.subheader(f"Visualizaciones de Eficiencia ({model_ran})")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.plotly_chart(results['histogram'], use_container_width=True)
+    with col2:
+        st.plotly_chart(results['scatter_3d'], use_container_width=True)
         
-        st.subheader("🧠 Métrica de Calidad del Diagnóstico (EEE)")
-        # ... (El código de la métrica EEE se mantiene igual)
+    st.subheader(f"🕷️ Benchmark Spider ({model_ran})")
+    dmu_options = results["df_results"][st.session_state.dmu_col].astype(str).tolist()
+    selected_dmu = st.selectbox("Seleccionar DMU para comparar:", options=dmu_options, key=f"dmu_{model_ran.lower()}")
+    if selected_dmu:
+        spider_fig = plot_benchmark_spider(results["merged_df"], selected_dmu, st.session_state.input_cols, st.session_state.output_cols)
+        st.plotly_chart(spider_fig, use_container_width=True)
