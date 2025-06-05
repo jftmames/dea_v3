@@ -1,10 +1,12 @@
 # src/dea_models/mpi.py
+
 import numpy as np
 import pandas as pd
 import cvxpy as cp
 
-from src.dea_models.radial import _dea_core  # Corregido a importación absoluta
-from src.dea_models.utils import validate_positive_dataframe # Corregido a importación absoluta
+# Corregido: Importaciones relativas dentro del paquete dea_models
+from .radial import _dea_core  # usamos el núcleo DEA radial
+from .utils import validate_positive_dataframe
 
 def compute_malmquist_phi(
     df_panel: pd.DataFrame,
@@ -41,9 +43,6 @@ def compute_malmquist_phi(
 
     # 3) Para cada DMU, calcular índices en cada par (t, t+1)
     for dmu_id in dmus_unique:
-        # Filtramos por DMU, no por período aquí, para luego iterar sobre períodos
-        # df_dmu = df_panel[df_panel[dmu_column] == dmu] # This line is not needed here
-
         for idx in range(len(periods) - 1):
             t = periods[idx]
             t1 = periods[idx + 1]
@@ -102,17 +101,16 @@ def compute_malmquist_phi(
                 # Catch-up (o recovery) = E_t1_t / E_t_t
                 catch_up = eff_t1_t / eff_t_t
 
-                # Re-calculating Frontier Shift based on common Malmquist decomposition:
                 # Technological Change Index (TCI) = sqrt( (Eff_t_t / Eff_t_t1) * (Eff_t1_t / Eff_t1_t1) )
                 if eff_t_t1 > 0 and eff_t1_t > 0 and eff_t1_t1 > 0:
                     front_shift = np.sqrt((eff_t_t / eff_t_t1) * (eff_t1_t / eff_t1_t1))
                 else:
-                    front_shift = np.nan # Avoid division by zero or negative efficiencies
+                    front_shift = np.nan
                 
                 if not np.isnan(catch_up) and not np.isnan(front_shift):
                     mpi_val = catch_up * front_shift # MPI = Catch-up * Frontier-shift (this is the decomposition)
                 else:
-                    mpi_val = np.nan # If any component is nan, MPI is nan
+                    mpi_val = np.nan
 
             resultados.append({
                 "DMU": dmu_id,
