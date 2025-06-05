@@ -3,8 +3,8 @@ import numpy as np
 import pandas as pd
 import cvxpy as cp
 
-from .utils import validate_positive_dataframe
-from .directions import get_direction_vector, get_custom_direction_vector
+from src.dea_models.utils import validate_positive_dataframe # Corregido a importación absoluta
+from src.dea_models.directions import get_direction_vector, get_custom_direction_vector # Corregido a importación absoluta
 
 def run_sbm(
     df: pd.DataFrame,
@@ -194,7 +194,7 @@ def run_radial_distance(
             Xl = X @ lambdas.value
             for k in range(m):
                 slacks_in[input_cols[k]] = float(x0[k] - t_val * g_x[k] - Xl[k])
-                if slacks_in[input_cols[k]] < 1e-9: slacks_in[input_cols[k]] = 0.0 # Threshold for zero
+                if slacks_in[input_cols[k]] < 1e-9: slacks_in[input_cols[k]] = 0.0 # Umbral para cero
         else:
             slacks_in = {col: np.nan for col in input_cols}
 
@@ -204,7 +204,7 @@ def run_radial_distance(
             Yl = Y @ lambdas.value
             for r in range(s):
                 slacks_out[output_cols[r]] = float(Yl[r] - y0[r] - t_val * g_y[r])
-                if slacks_out[output_cols[r]] < 1e-9: slacks_out[output_cols[r]] = 0.0 # Threshold for zero
+                if slacks_out[output_cols[r]] < 1e-9: slacks_out[output_cols[r]] = 0.0 # Umbral para cero
         else:
             slacks_out = {col: np.nan for col in output_cols}
 
