@@ -17,7 +17,7 @@ if script_dir not in sys.path:
 from data_validator import validate
 from results import mostrar_resultados
 from report_generator import generate_html_report, generate_excel_report
-# Se eliminan las importaciones de session_manager
+# La importación de session_manager se ha eliminado.
 from inquiry_engine import generate_inquiry, to_plotly_tree
 from epistemic_metrics import compute_eee
 from dea_models.visualizations import plot_benchmark_spider, plot_efficiency_histogram, plot_3d_inputs_outputs
@@ -93,12 +93,9 @@ if uploaded_file is not None:
 if 'df' in st.session_state and st.session_state.df is not None:
     df = st.session_state.df
     
-    # --- FUNCIÓN DE CALLBACK PARA RESETEAR EL ESTADO ---
     def reset_analysis_state():
         st.session_state.app_status = "initial"
         st.session_state.dea_results = None
-        st.session_state.inquiry_tree = None
-        st.session_state.eee_metrics = None
     
     st.subheader("Configuración del Análisis")
     
@@ -135,7 +132,7 @@ if 'df' in st.session_state and st.session_state.df is not None:
 # --- Mostrar resultados ---
 if st.session_state.get('app_status') == "results_ready" and st.session_state.get('dea_results'):
     results = st.session_state.dea_results
-    model_ran = results['model_type']
+    model_ran = results.get('model_type', 'Desconocido')
     
     st.header(f"Resultados del Análisis {model_ran}", divider='rainbow')
     
@@ -150,12 +147,14 @@ if st.session_state.get('app_status') == "results_ready" and st.session_state.ge
         st.plotly_chart(results['scatter_3d'], use_container_width=True)
         
     st.subheader(f"🕷️ Benchmark Spider ({model_ran})")
-    # Se usa .get() para acceder de forma segura a la columna, aunque el error de estado ya está resuelto.
-    dmu_list = results["df_results"].get(st.session_state.dmu_col, pd.Series([])).astype(str).tolist()
-    if dmu_list:
-        selected_dmu = st.selectbox("Seleccionar DMU para comparar:", options=dmu_list, key=f"dmu_{model_ran.lower()}")
+    
+    # --- CORRECCIÓN PARA EVITAR EL KEYERROR ---
+    dmu_col_name = st.session_state.get('dmu_col')
+    if dmu_col_name and dmu_col_name in results["df_results"].columns:
+        dmu_options = results["df_results"][dmu_col_name].astype(str).tolist()
+        selected_dmu = st.selectbox("Seleccionar DMU para comparar:", options=dmu_options, key=f"dmu_{model_ran.lower()}")
         if selected_dmu:
             spider_fig = plot_benchmark_spider(results["merged_df"], selected_dmu, st.session_state.input_cols, st.session_state.output_cols)
             st.plotly_chart(spider_fig, use_container_width=True)
     else:
-        st.warning("No se pudo generar la lista de DMUs para el gráfico de araña.")
+        st.warning("No se pudo generar el gráfico de araña. La columna de DMU no es válida o no se encontró en los resultados.")
