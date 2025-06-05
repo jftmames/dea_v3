@@ -274,7 +274,7 @@ def run_ccr(
 
 
 # ------------------------------------------------------------------
-# 4. Función pública: run_bcc (VERSIÓN OPTIMIZADA)
+# 4. Función pública: run_bcc (VERSIÓN OPTIMIZADA Y CORREGIDA)
 # ------------------------------------------------------------------
 def run_bcc(
     df: pd.DataFrame,
@@ -317,8 +317,8 @@ def run_bcc(
         if super_eff:
             mask = np.ones(n, dtype=bool)
             mask[i] = False
-            X_ref = X[:, mask]    # inputs de todas menos la i‐ésima
-            Y_ref = Y[:, mask]    # outputs de todas menos la i‐ésima
+            X_ref = X[:, mask]
+            Y_ref = Y[:, mask]
             dmus_ref = [dmus[j] for j in range(n) if j != i]
             num_vars = n - 1
         else:
@@ -368,7 +368,9 @@ def run_bcc(
         # 6) Extraer eficiencia
         current_eff_val = np.nan
         if prob.status in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE]:
-            current_eff_val = float(theta.value if orientation == "input" else phi.value)
+            value = theta.value if orientation == "input" else phi.value
+            if value is not None:
+                current_eff_val = float(value)
         eff[i] = current_eff_val 
 
         # 7) Extraer slacks
@@ -397,9 +399,15 @@ def run_bcc(
         if prob.status in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE]:
             dual_sum_lambda = prob.constraints[-1].dual_value
             if dual_sum_lambda is not None:
-                if abs(dual_sum_lambda) < 1e-6: rts_label = "CRS"
-                elif dual_sum_lambda < 0: rts_label = "IRS" if orientation == "input" else "DRS"
-                else: rts_label = "DRS" if orientation == "input" else "IRS"
+                # --- INICIO DE LA CORRECCIÓN ---
+                dual_val = float(dual_sum_lambda)
+                if abs(dual_val) < 1e-6:
+                    rts_label = "CRS"
+                elif dual_val < 0:
+                    rts_label = "IRS" if orientation == "input" else "DRS"
+                else:
+                    rts_label = "DRS" if orientation == "input" else "IRS"
+                # --- FIN DE LA CORRECCIÓN ---
         
         # 10) Guardar registro
         registros[i] = {
