@@ -37,10 +37,7 @@ def to_plotly_tree(tree: Dict[str, Any], title: str = "Árbol de Indagación") -
             
     walk(tree, root_label)
     
-    # --- CORRECCIÓN ---
-    # Se ha eliminado el parámetro inválido 'marker_colorscalefast=True'
     fig = go.Figure(go.Treemap(labels=labels, parents=parents, root_color="lightgrey"))
-    
     fig.update_layout(title_text=title, title_x=0.5, margin=dict(t=50, l=25, r=25, b=25))
     return fig
 
@@ -52,18 +49,20 @@ def generate_inquiry(
     Genera un árbol de preguntas usando el LLM.
     """
     ctx_str = json.dumps(context, indent=2) if context else "{}"
+    
+    # --- PROMPT MEJORADO: Instrucciones más estrictas ---
     prompt = (
         "Eres un experto mundial en Análisis Envolvente de Datos (DEA). "
         "Tu tarea es ayudar a un usuario a entender las causas de la ineficiencia en sus datos.\n\n"
         f"--- CONTEXTO DEL ANÁLISIS ---\n{ctx_str}\n\n"
         f"--- PREGUNTA CENTRAL ---\n{root_question}\n\n"
-        "--- TU TAREA ---\n"
-        "Descompón la pregunta central en un árbol de hipótesis jerárquico. "
-        "El resultado debe ser un único objeto JSON que represente este árbol. "
-        "Las claves del primer nivel deben ser 2-3 hipótesis principales sobre la ineficiencia (ej. 'Uso excesivo de recursos', 'Baja producción relativa'). "
-        "Los niveles inferiores deben detallar estas hipótesis con sub-preguntas o variables específicas a investigar (ej. '¿Hay un exceso en el input \"coste_personal\"?', '¿La producción de \"servicios_completados\" es baja comparada con los eficientes?')."
-        "Basa tus hipótesis en las variables del contexto."
+        "--- INSTRUCCIONES ESTRICTAS ---\n"
+        "1. Debes descomponer la pregunta central en un árbol de hipótesis jerárquico.\n"
+        "2. Tu única y exclusiva salida DEBE SER una llamada a la función `return_tree` con el objeto JSON que representa el árbol.\n"
+        "3. NO escribas ningún texto, explicación o saludo. Tu única acción es llamar a la función con el JSON.\n"
+        "4. El árbol debe tener 2-3 niveles. Las claves del primer nivel deben ser las hipótesis principales (ej. 'Uso excesivo de recursos'). Los niveles inferiores deben detallar estas hipótesis."
     )
+    
     try:
         resp = client.chat.completions.create(
             model="gpt-4o",
@@ -78,6 +77,7 @@ def generate_inquiry(
             if tree: 
                 return {root_question: tree}, None # Éxito, se añade la raíz
         
+        # Si la IA no devuelve una llamada a la función o el árbol está vacío
         return _fallback_tree(root_question), "La IA no devolvió un árbol válido. Usando árbol de respaldo."
 
     except Exception as e:
