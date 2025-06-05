@@ -1,9 +1,11 @@
+# src/inquiry_engine.py
 import os
 import json
 from typing import Any, Dict, Optional, Tuple
 from openai import OpenAI
 import plotly.graph_objects as go
 
+# Inicializar cliente OpenAI
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 FUNCTION_SPEC = {
@@ -36,7 +38,11 @@ def generate_inquiry(
     root_question: str,
     context: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
-    """Devuelve una tupla (árbol, mensaje_de_error)."""
+    """
+    Devuelve una tupla (arbol_de_preguntas, mensaje_de_error).
+    Si la operación es exitosa, mensaje_de_error es None.
+    Si falla, se devuelve un mensaje de error detallado.
+    """
     ctx = f"Contexto: {json.dumps(context)}\n\n" if context else ""
     prompt = (
         ctx + f"{root_question}\n\nGenera un árbol JSON con 2-3 hipótesis sobre las causas de la ineficiencia, "
@@ -53,16 +59,21 @@ def generate_inquiry(
         if resp.choices[0].message.tool_calls:
             args = resp.choices[0].message.tool_calls[0].function.arguments
             tree = json.loads(args).get("tree", {})
-            if tree: return tree, None
-        return _fallback_tree(root_question), "Respuesta de la IA inválida, usando árbol de respaldo."
+            if tree: 
+                return tree, None # Éxito
+        
+        # Si la IA no devuelve una llamada a la función o el árbol está vacío
+        return _fallback_tree(root_question), "La respuesta de la IA fue inválida, usando árbol de respaldo."
+
     except Exception as e:
-        return None, f"Fallo en la conexión con la API de OpenAI. Detalle: {e}"
+        # Captura cualquier error de la API (clave, fondos, red, etc.) y lo devuelve
+        return None, f"Fallo en la conexión con la API de OpenAI. Revisa tu clave, fondos y el estado del servicio. Detalle: {e}"
 
 def _fallback_tree(root_q: str) -> Dict[str, Any]:
-    """Árbol de respaldo."""
+    """Árbol de respaldo si la llamada a la IA falla."""
     return {
         root_q: {
-            "¿Posible exceso de inputs?": {},
-            "¿Posible déficit de outputs?": {},
+            "¿Posible exceso de inputs?": {"Analizar variable por variable": "Revisar datos"},
+            "¿Posible déficit de outputs?": {"Comparar con la media": "Revisar datos"},
         }
     }
