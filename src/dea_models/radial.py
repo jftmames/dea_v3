@@ -1,9 +1,8 @@
-# src/dea_models/radial.py
 import numpy as np
 import cvxpy as cp
 import pandas as pd
 
-from src.dea_models.utils import validate_positive_dataframe, validate_dataframe # Corregido a importación absoluta
+from .utils import validate_positive_dataframe, validate_dataframe
 
 # ------------------------------------------------------------------
 # 1. Núcleo DEA (CCR / BCC) — input/output orientation
@@ -295,7 +294,7 @@ def run_bcc(
         raise ValueError(f"La columna DMU '{dmu_column}' no existe en el DataFrame.")
 
     # 2) Validar que los inputs/outputs sean numéricos y > 0
-    from src.dea_models.utils import validate_dataframe # Corregido a importación absoluta
+    from .utils import validate_dataframe
     validate_dataframe(df, input_cols, output_cols, allow_zero=False, allow_negative=False)
 
     # 3) Preparar X (inputs) y Y (outputs)
@@ -443,21 +442,23 @@ def run_bcc(
                 lambdas_vals[ref_dmu_id] = np.nan
 
         # 9) Determinación de RTS (RTS_label)
-        rts_label = "VRS" 
+        rts_label = "VRS" # Default para BCC
         if prob.status in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE]:
-            if len(prob.constraints) > 0 and prob.constraints[-1].is_dual_ proyectos_known():
+            # La restricción de suma de lambdas es la última (cp.sum(lambdas) == 1)
+            # Asegurarse de que la restricción exista y tenga un valor dual
+            if len(prob.constraints) > 0:
                 dual_sum_lambda_constraint = prob.constraints[-1].dual_value
                 if dual_sum_lambda_constraint is not None:
-                    if abs(dual_sum_lambda_constraint) < 1e-6: 
-                        rts_label = "CRS" 
+                    if abs(dual_sum_lambda_constraint) < 1e-6: # Umbral para considerar un valor cercano a cero
+                        rts_label = "CRS" # Constant Returns to Scale
                     elif dual_sum_lambda_constraint < 0:
                         rts_label = "IRS" if orientation == "input" else "DRS"
-                    else: 
+                    else: # dual_sum_lambda_constraint > 0
                         rts_label = "DRS" if orientation == "input" else "IRS"
                 else:
                     rts_label = "Dual N/A"
             else:
-                rts_label = "Constraints N/A" 
+                rts_label = "Constraints N/A" # No constraints found for some reason
 
         # 10) Guardar registro
         registros[i] = {
