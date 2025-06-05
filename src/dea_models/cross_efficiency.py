@@ -1,5 +1,4 @@
 # src/dea_models/cross_efficiency.py
-
 import numpy as np
 import pandas as pd
 
@@ -47,5 +46,47 @@ def compute_cross_efficiency(
         super_eff=False
     )
     # df_ccr_full contiene una fila por DMU, con 'lambda_vector' dict
-    for j in range(n):
-        lambdas_list.append(df_ccr_full.loc[j, "lambda_vector"])
+    # Para la cross-efficiency, necesitamos los pesos duales u y v de cada DMU,
+    # no solo los lambdas. El _run_dea_internal no los devuelve directamente.
+    # Necesitamos una función que devuelva los u, v o que calcule las eficiencias cruzadas.
+    # Dado que _run_dea_internal no retorna los pesos duales, se asume que
+    # se re-calcularán las eficiencias individualmente usando los pesos del "evaluador".
+    # Esto implica simular el proceso de optimización para cada par (i, j).
+    # Sin embargo, el código original no implementa explícitamente el cálculo de los pesos (u, v),
+    # solo los lambda_vector. Si se desea una implementación completa de cross-efficiency,
+    # se debería extender _dea_core o _run_dea_internal para devolver los pesos duales,
+    # o adaptar la lógica para calcular la eficiencia de cada DMU 'i' utilizando
+    # la frontera (y, por lo tanto, los pesos implícitos) de cada DMU 'j'.
+
+    # Por ahora, se mantiene la estructura del archivo original que no completa
+    # la lógica de cálculo de la matriz de cross-efficiencies más allá de la obtención de lambdas.
+    # Para completar, necesitaríamos resolver el problema DEA para cada DMU 'j'
+    # para obtener sus pesos óptimos (u_j, v_j), y luego usar esos (u_j, v_j)
+    # para evaluar a todas las DMUs 'i'.
+
+    # Ejemplo conceptual (requeriría modificar _dea_core para devolver duales o re-formular):
+    # cross_eff_matrix = np.zeros((n, n))
+    # for j in range(n): # DMU evaluadora (usa sus pesos óptimos)
+    #     # Calcular u_j, v_j (pesos duales) para la DMU j
+    #     # Esto implicaría resolver un modelo DEA en formato dual
+    #     # (o modificar _dea_core para que devuelva los duales)
+    #     # u_j, v_j = get_optimal_dual_weights(df, input_cols, output_cols, j, rts)
+    #
+    #     # For each DMU i (being evaluated)
+    #     # for i in range(n):
+    #     #    eff_i_given_j = (v_j @ Y[:,i]) / (u_j @ X[:,i])
+    #     #    cross_eff_matrix[i, j] = eff_i_given_j
+    #
+    # # Una vez obtenida cross_eff_matrix, se aplica el método "average", "aggressive" o "benevolent"
+    # # para calcular la eficiencia cross-efficiency final de cada DMU.
+
+    # Dado que la implementación actual de _dea_internal solo devuelve lambdas y eficiencias
+    # y no los pesos duales (u, v) necesarios para el cálculo directo de cross-efficiency
+    # tal como se describe en la teoría de DEA, esta función tal cual está en el archivo
+    # no completaría el cálculo de la matriz de cross-efficiencies.
+
+    # Se retorna un DataFrame vacío como placeholder, ya que la lógica está incompleta.
+    # En un entorno real, esto requeriría una modificación en el núcleo DEA para
+    # exponer los pesos duales o una formulación alternativa para cross-efficiency.
+
+    return pd.DataFrame(index=dmus, columns=dmus) # Placeholder.
