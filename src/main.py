@@ -13,10 +13,15 @@ import pandas as pd
 import datetime
 
 # -------------------------------------------------------
-# 1) Ahora las importaciones no llevan prefijo "src."
+# 1) Importaciones (sin prefijo "src.")
 # -------------------------------------------------------
 from data_validator import validate
-from results import mostrar_resultados, plot_benchmark_spider, plot_efficiency_histogram, plot_3d_inputs_outputs
+from results import (
+    mostrar_resultados,
+    plot_benchmark_spider,
+    plot_efficiency_histogram,
+    plot_3d_inputs_outputs
+)
 from report_generator import generate_html_report, generate_excel_report
 from session_manager import init_db, save_session, load_sessions
 from inquiry_engine import generate_inquiry, to_plotly_tree
@@ -202,13 +207,13 @@ if st.session_state.df is not None:
                     )
                     st.session_state.dea_results = resultados
 
-                    # b) Generar Árbol de Indagación (ejemplo)
+                    # b) Generar Árbol de Indagación
                     root_q = "Diagnóstico de ineficiencia y estrategias de mejora"
                     context_for_llm = {
                         "inputs": st.session_state.input_cols,
                         "outputs": st.session_state.output_cols,
-                        "ccr_efficiencies_summary": st.session_state.dea_results["df_ccr"]["efficiency"].describe().to_dict(),
-                        "bcc_efficiencies_summary": st.session_state.dea_results["df_bcc"]["efficiency"].describe().to_dict(),
+                        "ccr_efficiencies_summary": st.session_state.dea_results["df_ccr"]["efficiency"].describe().to_dict(), #
+                        "bcc_efficiencies_summary": st.session_state.dea_results["df_bcc"]["efficiency"].describe().to_dict(), #
                         "sample_data_head": df.head().to_dict('records')
                     }
                     st.session_state.inquiry_tree = generate_inquiry(root_q, context=context_for_llm)
@@ -228,7 +233,7 @@ if st.session_state.df is not None:
                         flatten_tree(st.session_state.inquiry_tree)
                     st.session_state.df_tree = pd.DataFrame(tree_data_list)
 
-                    # d) Calcular puntuación EEE
+                    # d) Calcular puntuación EEE (con límites ficticios)
                     depth_limit = 5
                     breadth_limit = 5
                     st.session_state.eee_score = compute_eee(st.session_state.inquiry_tree, depth_limit, breadth_limit)
@@ -255,16 +260,32 @@ if st.session_state.df is not None:
         st.dataframe(df_bcc)
 
         st.subheader("Histograma de eficiencias CCR")
-        # En lugar de usar directamente Plotly, llamamos a la función que devuelve la figura
-        fig_hist_ccr = plot_efficiency_histogram(df_ccr, "tec_efficiency_ccr", title="CCR Efficiency Distribution")
+        # Asegurarse de que el nombre de la columna de eficiencia sea el correcto ('efficiency')
+        fig_hist_ccr = plot_efficiency_histogram(
+            df_ccr,
+            eff_col="efficiency", #
+            title="Distribución de eficiencias CCR"
+        )
         st.plotly_chart(fig_hist_ccr, use_container_width=True)
 
         st.subheader("Histograma de eficiencias BCC")
-        fig_hist_bcc = plot_efficiency_histogram(df_bcc, "efficiency", title="BCC Efficiency Distribution")
+        fig_hist_bcc = plot_efficiency_histogram(
+            df_bcc,
+            eff_col="efficiency", #
+            title="Distribución de eficiencias BCC"
+        )
         st.plotly_chart(fig_hist_bcc, use_container_width=True)
 
         st.subheader("Scatter 3D Inputs vs Output (CCR)")
-        fig_3d = plot_3d_inputs_outputs(df_ccr, st.session_state.input_cols, st.session_state.output_cols, color_col="tec_efficiency_ccr")
+        # Asegurarse de que el nombre de la columna de color sea el correcto ('efficiency')
+        fig_3d = plot_3d_inputs_outputs(
+            df_ccr,
+            st.session_state.input_cols,
+            st.session_state.output_cols,
+            df_ccr, # El DataFrame para el scatter 3D debe contener las columnas de inputs/outputs/DMU
+            st.session_state.dmu_col, # La columna DMU para el hover_name
+            color_col="efficiency" #
+        )
         st.plotly_chart(fig_3d, use_container_width=True)
 
         # -------------------------------------------------------
@@ -290,7 +311,8 @@ if st.session_state.df is not None:
         )
 
         if st.session_state.selected_dmu:
-            merged_ccr = df_ccr.merge(df, on=dmu_col, how="left")
+            # `plot_benchmark_spider` espera un DataFrame con 'efficiency'
+            merged_ccr = resultados["merged_ccr"] # Usar el merged_ccr ya preparado en results.py
             spider_fig = plot_benchmark_spider(
                 merged_ccr,
                 st.session_state.selected_dmu,
