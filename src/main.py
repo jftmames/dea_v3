@@ -120,5 +120,94 @@ if st.session_state.app_status != "initial":
         if st.session_state.app_status in ["results_ready", "inquiry_done"]:
             st.header("Paso 4: Razona y Explora las Causas con IA", divider="blue")
             
+            # --- CORRECCIÓN DE LA LÍNEA 124 ---
             if st.button("Generar Hipótesis de Ineficiencia con IA", use_container_width=True):
-                 with st.spinner("La IA está razonando sobre los
+                 with st.spinner("La IA está razonando sobre los resultados..."):
+                    avg_eff = results["df_ccr"]["tec_efficiency_ccr"].mean()
+                    context = {"inputs": proposal['inputs'], "outputs": proposal['outputs'], "avg_efficiency_ccr": avg_eff}
+                    root_question = f"Bajo el enfoque '{proposal['title']}', ¿cuáles son las principales causas de la ineficiencia?"
+                    tree, error = run_inquiry_engine(root_question, context)
+                    if error: st.error(f"Error: {error}")
+                    st.session_state.inquiry_tree = tree
+                    st.session_state.plot_variable_name = None
+                    st.session_state.app_status = "inquiry_done"
+
+            if st.session_state.get("inquiry_tree"):
+                col_tree, col_eee = st.columns([2, 1])
+                with col_tree:
+                    st.subheader("Árbol de Indagación", anchor=False)
+                    st.plotly_chart(to_plotly_tree(st.session_state.inquiry_tree), use_container_width=True)
+                with col_eee:
+                    st.subheader("Calidad del Razonamiento (EEE)", anchor=False)
+                    eee_metrics = compute_eee(st.session_state.inquiry_tree, depth_limit=3, breadth_limit=5)
+                    st.metric(label="Índice de Equilibrio Erotético (EEE)", value=f"{eee_metrics['score']:.2%}")
+                
+                st.subheader("Exploración Interactiva de Hipótesis", anchor=False)
+                placeholder = st.container()
+
+                leaf_nodes = []
+                def find_leaves(node):
+                    if not isinstance(node, dict) or not node: return
+                    is_leaf = True
+                    for value in node.values():
+                        if isinstance(value, dict) and value:
+                            is_leaf = False
+                            find_leaves(value)
+                    if is_leaf: leaf_nodes.extend(list(node.keys()))
+                find_leaves(st.session_state.inquiry_tree)
+                
+                st.info("Haz clic en una hipótesis para analizar los datos correspondientes.")
+                cols = st.columns(3)
+                col_idx = 0
+                for node in leaf_nodes:
+                    match = re.search(r"Analizar (input|output): \[(.*?)\]", node)
+                    if match:
+                        var_name = match.group(2).strip()
+                        with cols[col_idx % 3]:
+                            if st.button(f"Explorar: {node}", key=node, use_container_width=True):
+                                st.session_state.plot_variable_name = var_name
+                                st.rerun()
+                        col_idx += 1
+
+                if st.session_state.get("plot_variable_name"):
+                    var_to_plot = st.session_state.plot_variable_name
+                    with placeholder:
+                        st.markdown(f"#### Análisis de la hipótesis: '{var_to_plot}'")
+                        with st.spinner(f"Generando gráfico para '{var_to_plot}'..."):
+                            fig = plot_hypothesis_distribution(
+                                df_results=results['df_ccr'],
+                                df_original=df,
+                                variable=var_to_plot,
+                                dmu_col=df.columns[0]
+                            )
+                            st.plotly_chart(fig, use_container_width=True)
+                            if st.button("Cerrar exploración"):
+                                st.session_state.plot_variable_name = None
+                                st.rerun()
+
+        # ETAPA 5: Resultados Detallados
+        st.header("Paso 5: Resultados Numéricos y Gráficos Detallados", divider="blue")
+        tab_ccr, tab_bcc = st.tabs(["**Resultados CCR**", "**Resultados BCC**"])
+        
+        with tab_ccr:
+            st.subheader("Tabla de Eficiencias y Slacks (Modelo CCR)")
+            st.dataframe(results.get("df_ccr"))
+            st.subheader("Visualizaciones de Eficiencia (CCR)")
+            if "hist_ccr" in results and "scatter3d_ccr" in results:
+                col1, col2 = st.columns(2)
+                with col1: st.plotly_chart(results["hist_ccr"], use_container_width=True)
+                with col2: st.plotly_chart(results["scatter3d_ccr"], use_container_width=True)
+            st.subheader("Análisis de Benchmarking (CCR)")
+            dmu_options_ccr = results.get("df_ccr", pd.DataFrame()).get(df.columns[0], []).astype(str).tolist()
+            if dmu_options_ccr:
+                selected_dmu_ccr = st.selectbox("Seleccionar DMU para comparar con sus benchmarks:", options=dmu_options_ccr, key="dmu_ccr_spider")
+                if selected_dmu_ccr and "merged_ccr" in results:
+                    spider_fig_ccr = plot_benchmark_spider(results["merged_ccr"], selected_dmu_ccr, proposal['inputs'], proposal['outputs'])
+                    st.plotly_chart(spider_fig_ccr, use_container_width=True)
+
+        with tab_bcc:
+            st.subheader("Tabla de Eficiencias y Slacks (Modelo BCC)")
+            st.dataframe(results.get("df_bcc"))
+            st.subheader("Visualización de Eficiencia (BCC)")
+            if "hist_bcc" in results:
+                st.plotly_chart(results["hist_bcc"], use_container_width=True)
