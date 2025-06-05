@@ -224,6 +224,12 @@ def run_ccr(
                            Y_ref @ lambdas_var >= phi_rad * y0]
             obj_stage1 = cp.Maximize(phi_rad)
 
+        # Aquí asumo que el modelo "CCR" siempre implica CRS, y no se requiere
+        # la comprobación `model := "CCR"` como estaba en un código anterior,
+        # ya que `run_ccr` es para CCR específicamente.
+        # Si se necesita lógica específica para el parámetro `model`, se manejaría en `_run_dea_internal`.
+        # En run_ccr, se usa `rts="CRS"` de forma predeterminada para _dea_core.
+
         prob_stage1 = cp.Problem(obj_stage1, cons_stage1)
         prob_stage1.solve(solver=cp.ECOS, abstol=1e-7, reltol=1e-7, feastol=1e-7, verbose=False)
 
@@ -274,7 +280,7 @@ def run_ccr(
 
 
 # ------------------------------------------------------------------
-# 4. Función pública: run_bcc (actualizada)
+# 4. Función pública: run_bcc
 # ------------------------------------------------------------------
 def run_bcc(
     df: pd.DataFrame,
@@ -287,7 +293,7 @@ def run_bcc(
     """
     Ejecuta modelo BCC (VRS) con orientación 'input' u 'output'.
     Devuelve DataFrame con columnas:
-      DMU, efficiency, model, orientation, super_eff, slacks_inputs, slacks_outputs
+      DMU, efficiency, model, orientation, super_eff, lambda_vector, slacks_inputs, slacks_outputs, scale_efficiency, rts_label
     """
     # 1) Validar que exista la columna DMU
     if dmu_column not in df.columns:
