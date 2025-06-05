@@ -144,7 +144,45 @@ if 'df' in st.session_state and st.session_state.df is not None:
         if not st.session_state.get('input_cols') or not st.session_state.get('output_cols'):
             st.error("Por favor, selecciona al menos un input y un output.")
         else:
-            with st.spinner("Realizando análisis..."):
+            # --- VALIDACIÓN DE DATOS ASISTIDA POR IA ---
+            with st.spinner("Validando datos y consultando asistente de IA..."):
+                validation_results = validate(df, st.session_state.input_cols, st.session_state.output_cols)
+            
+            formal_issues = validation_results.get("formal_issues", [])
+            llm_feedback = validation_results.get("llm", {})
+
+            # Mostrar problemas formales si existen
+            if formal_issues:
+                st.error("Se encontraron problemas graves en los datos. Por favor, corrígelos antes de continuar.")
+                for issue in formal_issues:
+                    st.write(f"- {issue}")
+                st.stop() # Detiene la ejecución si hay errores formales
+            
+            # Mostrar feedback de la IA en un desplegable
+            with st.expander("🔍 Ver Validación y Recomendaciones del Asistente de IA", expanded=True):
+                if not os.getenv("OPENAI_API_KEY"):
+                    st.warning("La validación con IA está desactivada. Para activarla, añade tu API Key de OpenAI en los 'Secrets' de la configuración de la app.")
+                elif llm_feedback:
+                    llm_issues = llm_feedback.get("issues", [])
+                    if llm_issues:
+                        st.warning("Potenciales problemas detectados por la IA:")
+                        for issue in llm_issues:
+                            st.write(f" - {issue}")
+                    
+                    llm_fixes = llm_feedback.get("suggested_fixes", [])
+                    if llm_fixes:
+                        st.info("Sugerencias de mejora:")
+                        for fix in llm_fixes:
+                            st.write(f" - {fix}")
+                    
+                    if not llm_issues and not llm_fixes:
+                        st.success("El asistente de IA no ha encontrado problemas en la selección de variables.")
+                else:
+                    st.error("No se pudo obtener respuesta del asistente de IA.")
+
+
+            # --- ANÁLISIS DEA ---
+            with st.spinner("Realizando análisis DEA..."):
                 st.session_state.dea_results = run_dea_analysis(df, st.session_state.dmu_col, st.session_state.input_cols, st.session_state.output_cols)
                 context = {"inputs": st.session_state.input_cols, "outputs": st.session_state.output_cols}
                 df_hash = pd.util.hash_pandas_object(df).sum()
