@@ -29,22 +29,25 @@ st.set_page_config(layout="wide", page_title="SED - Simulador Econométrico-Deli
 # -------------------------------------------------------
 # 3) Funciones de inicialización y carga
 # -------------------------------------------------------
-def initialize_state():
+def initialize_state(clear_df=False):
     """Inicializa o resetea el estado de la sesión."""
+    if clear_df:
+        st.session_state.df = None
+        st.session_state.dmu_col = None
+        st.session_state.input_cols = []
+        st.session_state.output_cols = []
+        st.session_state.model_selection = 'CCR (Constantes)'
+        st.session_state.orientation_selection = 'Input (Minimizar)'
+        st.session_state._file_id = None
+
     st.session_state.app_status = "initial"
-    st.session_state.df = None
-    st.session_state.dmu_col = None
-    st.session_state.input_cols = []
-    st.session_state.output_cols = []
     st.session_state.dea_results = None
     st.session_state.inquiry_tree = None
     st.session_state.eee_metrics = None
     st.session_state.openai_error = None
-    st.session_state.model_selection = 'CCR (Constantes)'
-    st.session_state.orientation_selection = 'Input (Minimizar)'
 
 if 'app_status' not in st.session_state:
-    initialize_state()
+    initialize_state(clear_df=True)
 
 @st.cache_data
 def run_dea_analysis(_df, dmu_col, input_cols, output_cols, model_type, orientation):
@@ -55,7 +58,7 @@ def run_dea_analysis(_df, dmu_col, input_cols, output_cols, model_type, orientat
 def get_inquiry_and_eee(_root_q, _context, _df_hash):
     """Encapsula las llamadas al LLM y EEE, y devuelve el error si lo hay."""
     if not os.getenv("OPENAI_API_KEY"):
-        return None, None, "La clave API de OpenAI no está configurada en los Secrets."
+        return None, None, "La clave API de OpenAI no está configurada en los Secrets de la aplicación."
     
     inquiry_tree, error_msg = generate_inquiry(_root_q, context=_context)
     
@@ -64,6 +67,30 @@ def get_inquiry_and_eee(_root_q, _context, _df_hash):
     
     eee_metrics = compute_eee(inquiry_tree, depth_limit=5, breadth_limit=5)
     return inquiry_tree, eee_metrics, error_msg
+
+def run_full_analysis():
+    """Función centralizada para ejecutar todo el análisis."""
+    df = st.session_state.df
+    with st.spinner("Realizando análisis..."):
+        model_map = {'CCR (Constantes)': 'CCR', 'BCC (Variables)': 'BCC'}
+        orientation_map = {'Input (Minimizar)': 'input', 'Output (Maximizar)': 'output'}
+        selected_model = model_map[st.session_state.model_selection]
+        selected_orientation = orientation_map[st.session_state.orientation_selection]
+        
+        st.session_state.dea_results = run_dea_analysis(
+            df, st.session_state.dmu_col, st.session_state.input_cols, st.session_state.output_cols,
+            selected_model, selected_orientation
+        )
+        context = {"inputs": st.session_state.input_cols, "outputs": st.session_state.output_cols}
+        df_hash = pd.util.hash_pandas_object(df).sum()
+        tree, eee, error = get_inquiry_and_eee("Diagnóstico de ineficiencia", context, df_hash)
+        
+        st.session_state.inquiry_tree = tree
+        st.session_state.eee_metrics = eee
+        st.session_state.openai_error = error
+        
+        st.session_state.app_status = "results_ready"
+    st.success("Análisis completado.")
 
 # -------------------------------------------------------
 # 4) Sidebar
@@ -77,8 +104,9 @@ st.sidebar.info("Simulador Econométrico-Deliberativo para Análisis Envolvente 
 st.title("Simulador Econométrico-Deliberativo – DEA")
 uploaded_file = st.file_uploader("Cargar nuevo archivo CSV", type=["csv"])
 if uploaded_file is not None:
-    if not hasattr(st.session_state, '_file_id') or st.session_state._file_id != uploaded_file.file_id:
-        initialize_state()
+    file_id = uploaded_file.file_id
+    if not hasattr(st.session_state, '_file_id') or st.session_state._file_id != file_id:
+        initialize_state(clear_df=True)
         try:
             st.session_state.df = pd.read_csv(uploaded_file, sep=',')
         except Exception:
@@ -89,58 +117,32 @@ if uploaded_file is not None:
                 st.error(f"Error al leer el fichero CSV. Detalle: {e}")
                 st.session_state.df = None
         
-        st.session_state._file_id = uploaded_file.file_id
+        st.session_state._file_id = file_id
         if st.session_state.df is not None:
+            st.session_state.dmu_col = st.session_state.df.columns[0]
             st.rerun()
 
 if 'df' in st.session_state and st.session_state.df is not None:
     df = st.session_state.df
     
-    def reset_analysis_state():
-        st.session_state.app_status = "initial"
-        st.session_state.dea_results = None
-
-    def apply_scenario(new_inputs, new_outputs):
-        st.session_state.input_cols = new_inputs
-        st.session_state.output_cols = new_outputs
-    
     st.subheader("Configuración del Análisis")
     
     col_config, col_inputs, col_outputs = st.columns(3)
     with col_config:
-        st.selectbox("Columna de DMU", df.columns.tolist(), key='dmu_col', on_change=reset_analysis_state)
-        st.radio("Tipo de Modelo", ['CCR (Constantes)', 'BCC (Variables)'], key='model_selection', horizontal=True, on_change=reset_analysis_state)
-        st.radio("Orientación del Modelo", ['Input (Minimizar)', 'Output (Maximizar)'], key='orientation_selection', horizontal=True, on_change=reset_analysis_state)
+        st.selectbox("Columna de DMU", df.columns.tolist(), key='dmu_col', on_change=initialize_state)
+        st.radio("Tipo de Modelo", ['CCR (Constantes)', 'BCC (Variables)'], key='model_selection', horizontal=True, on_change=initialize_state)
+        st.radio("Orientación del Modelo", ['Input (Minimizar)', 'Output (Maximizar)'], key='orientation_selection', horizontal=True, on_change=initialize_state)
         
     with col_inputs:
-        st.multiselect("Columnas de Inputs", [c for c in df.columns.tolist() if c != st.session_state.dmu_col], key='input_cols', on_change=reset_analysis_state)
+        st.multiselect("Columnas de Inputs", [c for c in df.columns.tolist() if c != st.session_state.dmu_col], key='input_cols', on_change=initialize_state)
     with col_outputs:
-        st.multiselect("Columnas de Outputs", [c for c in df.columns.tolist() if c not in [st.session_state.dmu_col] + st.session_state.input_cols], key='output_cols', on_change=reset_analysis_state)
+        st.multiselect("Columnas de Outputs", [c for c in df.columns.tolist() if c not in [st.session_state.dmu_col] + st.session_state.input_cols], key='output_cols', on_change=initialize_state)
 
     if st.button("🚀 Ejecutar Análisis DEA", use_container_width=True):
         if not st.session_state.input_cols or not st.session_state.output_cols:
             st.error("Por favor, selecciona al menos un input y un output.")
         else:
-            with st.spinner("Realizando análisis..."):
-                model_map = {'CCR (Constantes)': 'CCR', 'BCC (Variables)': 'BCC'}
-                orientation_map = {'Input (Minimizar)': 'input', 'Output (Maximizar)': 'output'}
-                selected_model = model_map[st.session_state.model_selection]
-                selected_orientation = orientation_map[st.session_state.orientation_selection]
-                
-                st.session_state.dea_results = run_dea_analysis(
-                    df, st.session_state.dmu_col, st.session_state.input_cols, st.session_state.output_cols,
-                    selected_model, selected_orientation
-                )
-                context = {"inputs": st.session_state.input_cols, "outputs": st.session_state.output_cols}
-                df_hash = pd.util.hash_pandas_object(df).sum()
-                tree, eee, error = get_inquiry_and_eee("Diagnóstico de ineficiencia", context, df_hash)
-                
-                st.session_state.inquiry_tree = tree
-                st.session_state.eee_metrics = eee
-                st.session_state.openai_error = error
-                
-                st.session_state.app_status = "results_ready"
-            st.success("Análisis completado.")
+            run_full_analysis()
 
 # --- Mostrar resultados ---
 if st.session_state.get('app_status') == "results_ready" and st.session_state.get('dea_results'):
@@ -167,31 +169,52 @@ if st.session_state.get('app_status') == "results_ready" and st.session_state.ge
         if selected_dmu:
             spider_fig = plot_benchmark_spider(results["merged_df"], selected_dmu, st.session_state.input_cols, st.session_state.output_cols)
             st.plotly_chart(spider_fig, use_container_width=True)
-    else:
-        st.warning("No se pudo mostrar el gráfico de araña.")
-
-    # --- SECCIÓN DE ANÁLISIS DELIBERATIVO CON INTERFAZ TRANSPARENTE ---
+    
     st.header("Análisis Deliberativo Asistido por IA", divider='rainbow')
     
     if st.session_state.get('openai_error'):
         st.error(f"**Error en el Análisis Deliberativo:** {st.session_state.openai_error}")
-    
-    st.subheader("🔬 Escenarios Interactivos del Complejo de Indagación")
+
+    def apply_scenario_and_run(new_inputs, new_outputs):
+        st.session_state.input_cols = new_inputs
+        st.session_state.output_cols = new_outputs
+        run_full_analysis()
+
+    st.subheader("🔬 Escenarios Interactivos")
     if st.session_state.get('inquiry_tree'):
-        st.info("La IA ha generado las siguientes hipótesis. Pulsa un botón para actualizar la selección de inputs/outputs y luego ejecuta el análisis de nuevo.")
+        st.info("La IA sugiere probar los siguientes escenarios. Al pulsar un botón, el análisis se ejecutará automáticamente con la nueva configuración.")
         main_hypotheses = list(st.session_state.inquiry_tree.get(list(st.session_state.inquiry_tree.keys())[0], {}).keys())
         for i, hypothesis in enumerate(main_hypotheses):
             with st.container(border=True):
                 st.markdown(f"##### Hipótesis de la IA: *«{hypothesis}»*")
-                # ... (resto de la lógica de botones)
+                new_inputs = st.session_state.input_cols.copy()
+                new_outputs = st.session_state.output_cols.copy()
+                can_apply = False
+                action_text = "No aplicable con la selección actual."
+                if "input" in hypothesis.lower() and len(new_inputs) > 1:
+                    removed_var = new_inputs.pop(0)
+                    can_apply = True
+                    action_text = f"Probar sin el input: `{removed_var}`"
+                elif "output" in hypothesis.lower() and len(new_outputs) > 1:
+                    removed_var = new_outputs.pop(0)
+                    can_apply = True
+                    action_text = f"Probar sin el output: `{removed_var}`"
+                
+                st.button(action_text, key=f"hyp_{i}", on_click=apply_scenario_and_run, args=(new_inputs, new_outputs), disabled=not can_apply, use_container_width=True)
     else:
-        st.warning("No se han podido generar las recomendaciones de la IA.")
+        st.warning("No se generaron recomendaciones de la IA.")
     
     st.subheader("🧠 Métrica de Calidad del Diagnóstico (EEE)")
     eee = st.session_state.get('eee_metrics')
     if eee and eee.get('score', 0) > 0:
         st.metric(label="Puntuación EEE Total", value=f"{eee.get('score', 0):.4f}")
         with st.expander("Ver desglose y significado de la Métrica EEE"):
-            st.markdown("...")
+            st.markdown("""El **Índice de Equilibrio Erotético (EEE)** mide la calidad del árbol de diagnóstico. Una puntuación alta indica un análisis más completo.""")
+            st.markdown("**D1: Profundidad del Análisis**")
+            st.progress(eee.get('D1', 0), text=f"Puntuación: {eee.get('D1', 0):.2f}")
+            st.markdown("**D2: Pluralidad Semántica**")
+            st.progress(eee.get('D2', 0), text=f"Puntuación: {eee.get('D2', 0):.2f}")
+            st.markdown("**D3: Trazabilidad**")
+            st.progress(eee.get('D3', 0), text=f"Puntuación: {eee.get('D3', 0):.2f}")
     else:
-        st.warning("La Métrica EEE no se ha podido calcular porque no se generó un árbol de indagación válido.")
+        st.warning("No se pudo calcular la Métrica EEE.")
