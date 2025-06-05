@@ -106,11 +106,30 @@ st.title("Simulador Econométrico-Deliberativo – DEA")
 
 uploaded_file = st.file_uploader("Cargar nuevo archivo CSV", type=["csv"])
 if uploaded_file is not None:
-    initialize_state() # Reseteo limpio al cargar nuevo fichero
-    st.session_state.df = pd.read_csv(uploaded_file)
-    st.rerun()
+    # Esta sección se ejecuta solo una vez cuando se sube el fichero
+    if st.session_state.df is None:
+        initialize_state()
+        try:
+            # Intenta leer el CSV con separador de coma (estándar)
+            df_temp = pd.read_csv(uploaded_file, sep=',')
+            st.session_state.df = df_temp
+        except Exception:
+            try:
+                # Si falla, rebobina el fichero e intenta con punto y coma
+                uploaded_file.seek(0)
+                df_temp = pd.read_csv(uploaded_file, sep=';')
+                st.session_state.df = df_temp
+            except Exception as e:
+                # Si ambos fallan, muestra un error claro y no hace nada más
+                st.error(f"Error al leer el fichero CSV. Asegúrate de que el formato es correcto (separado por comas o punto y coma). Detalle: {e}")
+                st.session_state.df = None # Asegura que el estado siga siendo nulo
+
+        # Si el DataFrame se ha cargado con éxito, reinicia la app para mostrar la UI
+        if st.session_state.df is not None:
+            st.rerun()
 
 # --- Flujo principal de la UI ---
+# MÉTODO SEGURO para comprobar el DataFrame
 if 'df' in st.session_state and st.session_state.df is not None:
     df = st.session_state.df
     st.subheader("Configuración del Análisis")
@@ -152,7 +171,6 @@ if 'df' in st.session_state and st.session_state.df is not None:
                 
                 st.session_state.app_status = "results_ready"
             st.success("Análisis completado.")
-            # La línea st.rerun() que causaba el bucle ha sido eliminada.
 
 # --- Mostrar resultados ---
 if st.session_state.get('app_status') == "results_ready" and st.session_state.get('dea_results'):
