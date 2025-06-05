@@ -1,4 +1,5 @@
 # src/inquiry_engine.py
+
 import os
 import json
 import re
@@ -7,7 +8,8 @@ from typing import Any, Dict, Optional, Tuple
 import pandas as pd
 from openai import OpenAI
 
-from src.data_validator import _llm_suggest # Corregido a importación absoluta
+# Corregido: Importación directa del módulo data_validator
+from data_validator import _llm_suggest
 
 # Inicializar cliente OpenAI
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
