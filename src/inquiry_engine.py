@@ -63,19 +63,18 @@ def to_plotly_tree(tree: Dict[str, Any], title: str = "Visualización del Árbol
     )
     return fig
 
-# ---- Generador de subpreguntas con fallback triple ----
+# ---- Generador de subpreguntas con manejo de errores explícito ----
 def generate_inquiry(
     root_question: str,
     context: Optional[Dict[str, Any]] = None,
     depth: int = 3,
     breadth: int = 5,
     temperature: float = 0.3,
-) -> Dict[str, Any]:
+) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """
-    Devuelve un árbol de subpreguntas basado en DEA para root_question.
-    1) Intenta function-calling para devolver JSON válido.
-    2) Si falla, parsea el contenido textual como JSON.
-    3) Si aún falla o es vacío, devuelve un árbol placeholder.
+    Devuelve una tupla (árbol_de_preguntas, mensaje_de_error).
+    Si la operación es exitosa, mensaje_de_error es None.
+    Si falla, árbol_de_preguntas es None.
     """
     ctx = f"Contexto:\n{json.dumps(context, indent=2)}\n\n" if context else ""
     user_prompt = (
@@ -103,26 +102,26 @@ def generate_inquiry(
                 data = json.loads(args)
                 tree = data.get("tree", data)
                 if _tree_is_valid(tree):
-                    return tree
-            except json.JSONDecodeError:
-                pass
+                    return tree, None # Éxito
+            except json.JSONDecodeError as e:
+                return None, f"Error de OpenAI: La respuesta no es un JSON válido. ({e})"
 
         # b) Intentar parsear texto como JSON
         raw_content = resp.choices[0].message.content or ""
-        raw = raw_content.strip()
-        if raw:
+        if raw_content:
             try:
-                tree = json.loads(raw)
+                tree = json.loads(raw_content)
                 if _tree_is_valid(tree):
-                    return tree
-            except Exception:
-                pass
-    except Exception:
-        # Si la API de OpenAI falla, ir directamente al fallback
-        pass
+                    return tree, None # Éxito
+            except Exception as e:
+                return None, f"Error al procesar la respuesta de OpenAI. ({e})"
 
-    # c) Fallback enriquecido
-    return _fallback_tree(root_question)
+        # Si llegamos aquí, la respuesta de la IA fue vacía o inválida
+        return _fallback_tree(root_question), "La respuesta de la IA fue vacía o inválida, usando árbol de respaldo."
+
+    except Exception as e:
+        # Si la API de OpenAI falla (ej. clave inválida, sin crédito, problema de red)
+        return None, f"Fallo en la conexión con la API de OpenAI: {e}"
 
 # ---- Validar estructura del árbol ----
 def _tree_is_valid(tree: Dict[str, Any]) -> bool:
@@ -133,7 +132,6 @@ def _tree_is_valid(tree: Dict[str, Any]) -> bool:
         return False
     
     first_level_values = tree.values()
-    # Es válido si al menos uno de sus hijos es también un diccionario (tiene sub-ramas)
     return any(isinstance(value, dict) for value in first_level_values)
 
 
@@ -151,29 +149,3 @@ def _fallback_tree(root_q: str) -> Dict[str, Any]:
             },
         }
     }
-
-# ---- Nueva función: sugerir rango típico para un insumo ----
-def suggest_input_range(
-    df: pd.DataFrame,
-    input_name: str
-) -> Optional[Tuple[float, float, str]]:
-    """
-    Usa RAG para sugerir un rango [min–max] típico para un insumo.
-    """
-    df_head_json = df.head().to_json(orient="records")
-    res = _llm_suggest(df_head_json, [input_name], [])
-
-    if not res or "suggested_fixes" not in res:
-        return None
-
-    suggestion_text = res["suggested_fixes"][0] if res["suggested_fixes"] else ""
-
-    match = re.search(r"\[\s*([0-9.]+)\s*,\s*([0-9.]+)\s*\]", suggestion_text)
-    if match:
-        try:
-            min_sug, max_sug = float(match.group(1)), float(match.group(2))
-            return min_sug, max_sug, suggestion_text
-        except ValueError:
-            pass
-    
-    return None
