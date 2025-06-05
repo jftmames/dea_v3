@@ -122,7 +122,6 @@ if 'df' in st.session_state and st.session_state.df is not None:
     df = st.session_state.df
     st.subheader("Configuración del Análisis")
     
-    # --- Callback para actualizar la selección de inputs/outputs ---
     def apply_scenario(new_inputs, new_outputs):
         st.session_state.input_cols = new_inputs
         st.session_state.output_cols = new_outputs
@@ -139,42 +138,15 @@ if 'df' in st.session_state and st.session_state.df is not None:
         if not st.session_state.input_cols or not st.session_state.output_cols:
             st.error("Por favor, selecciona al menos un input y un output.")
         else:
-            # --- 1. VALIDACIÓN DE DATOS ASISTIDA POR IA ---
-            with st.spinner("Validando datos y consultando asistente de IA..."):
+            with st.spinner("Validando datos y realizando análisis..."):
                 validation_results = validate(df, st.session_state.input_cols, st.session_state.output_cols)
-            
-            formal_issues = validation_results.get("formal_issues", [])
-            llm_feedback = validation_results.get("llm", {})
-
-            if formal_issues:
-                st.error("Se encontraron problemas graves en los datos. Por favor, corrígelos antes de continuar.")
-                for issue in formal_issues:
-                    st.write(f"- {issue}")
-                st.stop()
-            
-            with st.expander("🔍 Ver Validación y Recomendaciones del Asistente de IA", expanded=True):
-                if not os.getenv("OPENAI_API_KEY"):
-                    st.warning("La validación con IA está desactivada. Añade tu API Key de OpenAI en los 'Secrets' de la app.")
-                elif llm_feedback:
-                    llm_issues = llm_feedback.get("issues", [])
-                    if llm_issues:
-                        st.warning("Potenciales problemas detectados por la IA:")
-                        for issue in llm_issues:
-                            st.write(f" - {issue}")
-                    
-                    llm_fixes = llm_feedback.get("suggested_fixes", [])
-                    if llm_fixes:
-                        st.info("Sugerencias de mejora:")
-                        for fix in llm_fixes:
-                            st.write(f" - {fix}")
-                    
-                    if not llm_issues and not llm_fixes:
-                        st.success("El asistente de IA no ha encontrado problemas en la selección de variables.")
-                else:
-                    st.error("No se pudo obtener respuesta del asistente de IA.")
-
-            # --- 2. ANÁLISIS DEA Y DELIBERATIVO ---
-            with st.spinner("Realizando análisis completo..."):
+                formal_issues = validation_results.get("formal_issues", [])
+                if formal_issues:
+                    st.error("Se encontraron problemas graves en los datos. Por favor, corrígelos:")
+                    for issue in formal_issues:
+                        st.write(f"- {issue}")
+                    st.stop()
+                
                 st.session_state.dea_results = run_dea_analysis(df, st.session_state.dmu_col, st.session_state.input_cols, st.session_state.output_cols)
                 context = {"inputs": st.session_state.input_cols, "outputs": st.session_state.output_cols}
                 df_hash = pd.util.hash_pandas_object(df).sum()
@@ -186,65 +158,85 @@ if 'df' in st.session_state and st.session_state.df is not None:
 if st.session_state.get('app_status') == "results_ready" and st.session_state.get('dea_results'):
     results = st.session_state.dea_results
     st.header("Resultados del Análisis DEA", divider='rainbow')
+    
     tab_ccr, tab_bcc = st.tabs(["**Análisis CCR**", "**Análisis BCC**"])
+    
     with tab_ccr:
         st.subheader("📊 Tabla de Eficiencias (CCR)")
         st.dataframe(results["df_ccr"])
+        st.subheader("Visualizaciones de Eficiencia (CCR)")
+        col1, col2 = st.columns(2)
+        with col1:
+            if 'hist_ccr' in results:
+                st.plotly_chart(results['hist_ccr'], use_container_width=True)
+        with col2:
+            if 'scatter3d_ccr' in results:
+                st.plotly_chart(results['scatter3d_ccr'], use_container_width=True)
+        st.subheader("🕷️ Benchmark Spider (CCR)")
+        dmu_options_ccr = results["df_ccr"][st.session_state.dmu_col].astype(str).tolist()
+        selected_dmu_ccr = st.selectbox("Seleccionar DMU para comparar (CCR):", options=dmu_options_ccr, key="dmu_ccr")
+        if selected_dmu_ccr:
+            spider_fig_ccr = plot_benchmark_spider(results["merged_ccr"], selected_dmu_ccr, st.session_state.input_cols, st.session_state.output_cols)
+            st.plotly_chart(spider_fig_ccr, use_container_width=True)
+
     with tab_bcc:
         st.subheader("📊 Tabla de Eficiencias (BCC)")
         st.dataframe(results["df_bcc"])
+        st.subheader("Visualización de Eficiencia (BCC)")
+        if 'hist_bcc' in results:
+            st.plotly_chart(results['hist_bcc'], use_container_width=True)
 
     if st.session_state.get('inquiry_tree'):
         st.header("Análisis Deliberativo Asistido por IA", divider='rainbow')
         st.subheader("🔬 Escenarios Interactivos del Complejo de Indagación")
-        st.info("Estos botones representan las recomendaciones de la IA. Seleccióna un escenario para actualizar los inputs/outputs y vuelve a pulsar 'Ejecutar Análisis DEA' para ver el impacto.")
+        st.info("La IA ha generado las siguientes hipótesis sobre las causas de la ineficiencia. Haz clic en un botón para probar un escenario y luego pulsa 'Ejecutar Análisis DEA' de nuevo para ver el impacto.")
         
         main_hypotheses = list(st.session_state.inquiry_tree.get(list(st.session_state.inquiry_tree.keys())[0], {}).keys())
-        cols = st.columns(len(main_hypotheses) or 1)
         
         for i, hypothesis in enumerate(main_hypotheses):
+            st.markdown(f"**Recomendación de la IA:** *{hypothesis}*")
+            
             new_inputs = st.session_state.input_cols.copy()
             new_outputs = st.session_state.output_cols.copy()
             can_apply = False
+            help_text = "Este escenario no es aplicable con la selección actual."
 
             if "input" in hypothesis.lower() and len(new_inputs) > 1:
-                new_inputs.pop(0)
+                removed_var = new_inputs.pop(0)
                 can_apply = True
+                help_text = f"Prueba el análisis sin el input: '{removed_var}'"
             elif "output" in hypothesis.lower() and len(new_outputs) > 1:
-                new_outputs.pop(0)
+                removed_var = new_outputs.pop(0)
                 can_apply = True
+                help_text = f"Prueba el análisis sin el output: '{removed_var}'"
             
-            with cols[i]:
-                st.button(
-                    hypothesis,
-                    key=f"hyp_{i}",
-                    use_container_width=True,
-                    on_click=apply_scenario,
-                    args=(new_inputs, new_outputs),
-                    disabled=not can_apply,
-                    help="Actualiza la selección de Inputs/Outputs de arriba con este escenario."
-                )
+            st.button(
+                "Probar este escenario",
+                key=f"hyp_{i}",
+                on_click=apply_scenario,
+                args=(new_inputs, new_outputs),
+                disabled=not can_apply,
+                help=help_text
+            )
+            st.divider()
 
         st.subheader("🧠 Métrica de Calidad del Diagnóstico (EEE)")
         eee = st.session_state.get('eee_metrics')
         if eee:
             st.metric(label="Puntuación EEE Total", value=f"{eee.get('score', 0):.4f}")
             with st.expander("Ver desglose y significado de la Métrica EEE"):
-                st.markdown("""
-                El **Índice de Equilibrio Erotético (EEE)** mide la calidad del árbol de diagnóstico. Una puntuación alta indica un análisis más completo.
-                """)
+                st.markdown("""El **Índice de Equilibrio Erotético (EEE)** mide la calidad y robustez del árbol de diagnóstico. Una puntuación alta indica un análisis más completo.""")
                 st.markdown("**D1: Profundidad del Análisis**")
-                st.progress(eee.get('D1', 0))
+                st.progress(eee.get('D1', 0), text=f"Puntuación: {eee.get('D1', 0):.2f}")
                 st.markdown("**D2: Pluralidad Semántica (Variedad de hipótesis)**")
-                st.progress(eee.get('D2', 0))
+                st.progress(eee.get('D2', 0), text=f"Puntuación: {eee.get('D2', 0):.2f}")
                 st.markdown("**D3: Trazabilidad del Razonamiento**")
-                st.progress(eee.get('D3', 0))
+                st.progress(eee.get('D3', 0), text=f"Puntuación: {eee.get('D3', 0):.2f}")
 
     st.header("Acciones", divider='rainbow')
     notes = st.text_area("Notas de la sesión")
-    
     if st.button("💾 Guardar Sesión", use_container_width=True):
-        st.success("¡Sesión guardada!")
+        st.success("¡Sesión guardada! (Funcionalidad en desarrollo)")
         st.balloons()
 
     st.subheader("Generar Reportes")
@@ -252,16 +244,10 @@ if st.session_state.get('app_status') == "results_ready" and st.session_state.ge
     with col1:
         st.download_button(
             "Descargar HTML",
-            generate_html_report(results["df_ccr"], st.session_state.get('df_tree'), st.session_state.get('df_eee')),
-            f"reporte_dea.html",
-            "text/html",
-            use_container_width=True
-        )
+            generate_html_report(results.get("df_ccr"), st.session_state.get('df_tree'), st.session_state.get('df_eee')),
+            "reporte_dea.html", "text/html", use_container_width=True)
     with col2:
         st.download_button(
             "Descargar Excel",
-            generate_excel_report(results["df_ccr"], st.session_state.get('df_tree'), st.session_state.get('df_eee')),
-            f"reporte_dea.xlsx",
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
+            generate_excel_report(results.get("df_ccr"), st.session_state.get('df_tree'), st.session_state.get('df_eee')),
+            "reporte_dea.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
