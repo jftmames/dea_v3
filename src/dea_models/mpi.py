@@ -3,8 +3,8 @@ import numpy as np
 import pandas as pd
 import cvxpy as cp
 
-from .radial import _dea_core  # usamos el núcleo DEA radial
-from .utils import validate_positive_dataframe
+from src.dea_models.radial import _dea_core  # Corregido a importación absoluta
+from src.dea_models.utils import validate_positive_dataframe # Corregido a importación absoluta
 
 def compute_malmquist_phi(
     df_panel: pd.DataFrame,
@@ -102,17 +102,6 @@ def compute_malmquist_phi(
                 # Catch-up (o recovery) = E_t1_t / E_t_t
                 catch_up = eff_t1_t / eff_t_t
 
-                # Frontier shift (o technological change) = sqrt((E_t_t / E_t_t1) * (E_t1_t / E_t1_t1))
-                # The provided formula in original code for MPI is: sqrt((eff_t1_t / eff_t_t) * (eff_t1_t1 / eff_t_t1))
-                # This corresponds to: sqrt(Catch-up * Efficiency_change) where Efficiency_change is E_t1_t1/E_t_t1
-                # Or, often it's: MPI = Technical_Efficiency_Change * Technological_Change
-                # Technical_Efficiency_Change = eff_t1_t1 / eff_t_t (from t to t+1 against own frontier)
-                # Technological_Change = sqrt((eff_t_t / eff_t_t1) * (eff_t1_t / eff_t1_t1)) -- this is not correct for the ratio
-                # The standard decomposition is: MPI = (eff_t1_t1 / eff_t_t) * sqrt((eff_t_t / eff_t_t1) * (eff_t1_t / eff_t1_t1))
-                # Let's stick to the MPI formula provided in the original code, which is usually for overall.
-                # MPI = sqrt((eff_t1_t / eff_t_t) * (eff_t1_t1 / eff_t_t1))
-                # Frontier Shift = sqrt((E_t_t / E_t_t1) * (E_t1_t / E_t1_t1))
-                
                 # Re-calculating Frontier Shift based on common Malmquist decomposition:
                 # Technological Change Index (TCI) = sqrt( (Eff_t_t / Eff_t_t1) * (Eff_t1_t / Eff_t1_t1) )
                 if eff_t_t1 > 0 and eff_t1_t > 0 and eff_t1_t1 > 0:
