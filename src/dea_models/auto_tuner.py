@@ -1,10 +1,11 @@
 # src/dea_models/auto_tuner.py
+
 import pandas as pd
 import numpy as np
 import uuid
 
-from src.dea_models.radial import _run_dea_internal # Corregido a importación absoluta
-from src.dea_models.utils import validate_positive_dataframe # Corregido a importación absoluta
+from .radial import _run_dea_internal
+from .utils import validate_positive_dataframe
 
 def generate_candidates(
     df: pd.DataFrame,
