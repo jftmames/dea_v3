@@ -1,16 +1,15 @@
 # src/main.py
-
 import streamlit as st
 import pandas as pd
 import datetime
 
-# Importaciones corregidas a absolutas (sin el punto inicial)
-from data_validator import validate
-from results import mostrar_resultados, plot_benchmark_spider, plot_efficiency_histogram, plot_3d_inputs_outputs
-from report_generator import generate_html_report, generate_excel_report
-from session_manager import init_db, save_session, load_sessions
-from inquiry_engine import generate_inquiry, to_plotly_tree
-from epistemic_metrics import compute_eee
+# Importaciones corregidas a absolutas (usando el prefijo 'src.')
+from src.data_validator import validate
+from src.results import mostrar_resultados, plot_benchmark_spider, plot_efficiency_histogram, plot_3d_inputs_outputs
+from src.report_generator import generate_html_report, generate_excel_report
+from src.session_manager import init_db, save_session, load_sessions
+from src.inquiry_engine import generate_inquiry, to_plotly_tree
+from src.epistemic_metrics import compute_eee
 
 
 # -------------------------------------------------------
