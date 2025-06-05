@@ -1,6 +1,12 @@
 import pandas as pd
+import plotly.express as px
+
 from dea_models.radial import run_ccr, run_bcc
-from dea_models.visualizations import plot_efficiency_histogram
+from dea_models.visualizations import (
+    plot_benchmark_spider,
+    plot_efficiency_histogram,
+    plot_3d_inputs_outputs
+)
 
 def mostrar_resultados(
     df: pd.DataFrame,
@@ -9,11 +15,13 @@ def mostrar_resultados(
     outputs: list[str]
 ) -> dict:
     """
-    Versión base que ejecuta CCR y BCC y devuelve los dataframes de resultados.
+    Versión completa que ejecuta ambos modelos (CCR y BCC),
+    genera los DataFrames resultantes y produce todas las figuras de Plotly.
+    Devuelve un diccionario con todos los resultados y figuras.
     """
     resultados = {}
 
-    # Ejecutar CCR
+    # 1) Ejecutar CCR
     df_ccr = run_ccr(
         df=df,
         dmu_column=dmu_column,
@@ -21,9 +29,8 @@ def mostrar_resultados(
         output_cols=outputs,
         orientation="input"
     )
-    resultados["df_ccr"] = df_ccr
 
-    # Ejecutar BCC
+    # 2) Ejecutar BCC
     df_bcc = run_bcc(
         df=df,
         dmu_column=dmu_column,
@@ -31,6 +38,29 @@ def mostrar_resultados(
         output_cols=outputs,
         df_ccr_results=df_ccr
     )
+    
+    # 3) Renombrar columnas de eficiencia para consistencia en los histogramas
+    df_ccr_for_plots = df_ccr.rename(columns={"tec_efficiency_ccr": "efficiency"})
+    
+    resultados["df_ccr"] = df_ccr
     resultados["df_bcc"] = df_bcc
+
+    # 4) Unir resultados con df original para visualizaciones (spider plot)
+    merged_ccr = df_ccr.merge(df, on=dmu_column, how="left")
+    merged_bcc = df_bcc.merge(df, on=dmu_column, how="left")
+    resultados["merged_ccr"] = merged_ccr
+    resultados["merged_bcc"] = merged_bcc
+
+    # 5) Crear figuras de histograma
+    hist_ccr = plot_efficiency_histogram(df_ccr_for_plots)
+    hist_bcc = plot_efficiency_histogram(df_bcc) # El df_bcc ya tiene una columna 'efficiency'
+    resultados["hist_ccr"] = hist_ccr
+    resultados["hist_bcc"] = hist_bcc
+
+    # 6) Crear figuras de scatter 3D
+    scatter3d_ccr = plot_3d_inputs_outputs(df, inputs, outputs, df_ccr_for_plots, dmu_column)
+    scatter3d_bcc = plot_3d_inputs_outputs(df, inputs, outputs, df_bcc, dmu_column)
+    resultados["scatter3d_ccr"] = scatter3d_ccr
+    resultados["scatter3d_bcc"] = scatter3d_bcc
 
     return resultados
