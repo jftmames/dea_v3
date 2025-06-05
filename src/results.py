@@ -2,8 +2,9 @@
 import pandas as pd
 import plotly.express as px
 
-from .dea_models.radial import run_ccr, run_bcc # Changed to relative import
-from .dea_models.visualizations import plot_benchmark_spider, plot_efficiency_histogram, plot_3d_inputs_outputs # Changed to relative import
+# Importaciones corregidas a absolutas
+from src.dea_models.radial import run_ccr, run_bcc 
+from src.dea_models.visualizations import plot_benchmark_spider, plot_efficiency_histogram, plot_3d_inputs_outputs 
 
 
 def mostrar_resultados(
