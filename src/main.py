@@ -3,7 +3,7 @@ import sys
 import os
 import pandas as pd
 import streamlit as st
-import re # Importar la librería de expresiones regulares
+import re
 
 # --- 0) Ajuste del PYTHONPATH ---
 script_dir = os.path.dirname(__file__)
@@ -15,7 +15,7 @@ from results import mostrar_resultados
 from inquiry_engine import generate_inquiry, to_plotly_tree
 from epistemic_metrics import compute_eee
 from openai_helpers import generate_analysis_proposals
-from dea_models.visualizations import plot_hypothesis_distribution # <--- NUEVA IMPORTACIÓN
+from dea_models.visualizations import plot_hypothesis_distribution
 
 # --- 2) Configuración ---
 st.set_page_config(layout="wide", page_title="DEA Deliberativo con IA")
@@ -23,7 +23,6 @@ st.set_page_config(layout="wide", page_title="DEA Deliberativo con IA")
 # --- 3) Funciones de estado y caché ---
 def initialize_state():
     """Inicializa el estado de la sesión."""
-    # ... (sin cambios)
     for key in list(st.session_state.keys()):
         if not key.startswith('_'):
             del st.session_state[key]
@@ -116,6 +115,7 @@ if st.session_state.app_status != "initial":
                 tree, error = run_inquiry_engine(root_question, context)
                 if error: st.error(f"Error: {error}")
                 st.session_state.inquiry_tree = tree
+                st.session_state.plot_variable_name = None # Limpiar exploración anterior
 
         if st.session_state.get("inquiry_tree"):
             col_tree, col_eee = st.columns([2, 1])
@@ -128,42 +128,55 @@ if st.session_state.app_status != "initial":
                 st.metric(label="Índice de Equilibrio Erotético (EEE)", value=f"{eee_metrics['score']:.2%}")
                 with st.expander("Ver desglose del EEE"):
                      st.markdown(f"- D1: Profundidad ({eee_metrics['D1']:.2f})")
+                     st.markdown(f"- D2: Pluralidad ({eee_metrics['D2']:.2f})")
 
-            # --- NUEVA SECCIÓN: EXPLORACIÓN INTERACTIVA ---
+            # --- SECCIÓN DE EXPLORACIÓN INTERACTIVA MEJORADA ---
             st.subheader("Exploración Interactiva de Hipótesis", anchor=False)
-            placeholder = st.container() # Contenedor para el gráfico
             
-            # Extraer hojas del árbol para crear botones
+            # Contenedor para mostrar el gráfico de la hipótesis seleccionada
+            placeholder = st.container()
+
             leaf_nodes = []
             def find_leaves(node):
-                if not isinstance(node, dict) or not node:
-                    return
+                if not isinstance(node, dict) or not node: return
                 is_leaf = True
                 for key, value in node.items():
                     if isinstance(value, dict) and value:
                         is_leaf = False
                         find_leaves(value)
-                if is_leaf:
-                    leaf_nodes.extend(list(node.keys()))
-
+                if is_leaf: leaf_nodes.extend(list(node.keys()))
             find_leaves(st.session_state.inquiry_tree)
             
+            # Inicializar la variable de estado si no existe
+            if 'plot_variable_name' not in st.session_state:
+                st.session_state.plot_variable_name = None
+
             st.info("Haz clic en una hipótesis para analizar los datos correspondientes.")
             for node in leaf_nodes:
                 match = re.search(r"Analizar (input|output): \[(.*?)\]", node)
                 if match:
-                    var_type = match.group(1)
-                    var_name = match.group(2)
+                    var_name = match.group(2).strip() # Limpiar espacios
                     if st.button(f"Explorar: {node}", key=node):
-                        with placeholder:
-                            with st.spinner(f"Generando gráfico para '{var_name}'..."):
-                                fig = plot_hypothesis_distribution(
-                                    df_results=results['df_ccr'],
-                                    df_original=df,
-                                    variable=var_name,
-                                    dmu_col=df.columns[0]
-                                )
-                                st.plotly_chart(fig, use_container_width=True)
+                        # Al hacer clic, guardamos la variable a explorar en el estado
+                        st.session_state.plot_variable_name = var_name
+                        st.rerun() # Forzamos un rerun para mostrar el gráfico inmediatamente
+
+            # Si hay una variable seleccionada en el estado, mostramos el gráfico
+            if st.session_state.get("plot_variable_name"):
+                var_to_plot = st.session_state.plot_variable_name
+                with placeholder.container(): # Usar el placeholder
+                    st.markdown(f"#### Análisis de la hipótesis: '{var_to_plot}'")
+                    with st.spinner(f"Generando gráfico para '{var_to_plot}'..."):
+                        fig = plot_hypothesis_distribution(
+                            df_results=results['df_ccr'],
+                            df_original=df,
+                            variable=var_to_plot,
+                            dmu_col=df.columns[0]
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+                        if st.button("Cerrar exploración"):
+                            st.session_state.plot_variable_name = None
+                            st.rerun()
 
         # ETAPA 5: Resultados Detallados
         st.header("Paso 5: Resultados Numéricos Detallados", divider="blue")
