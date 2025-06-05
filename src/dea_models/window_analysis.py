@@ -1,9 +1,8 @@
 # src/dea_models/window_analysis.py
-
 import pandas as pd
 import numpy as np
 
-from .radial import run_ccr   # <- usamos run_ccr en lugar de _run_dea_core_panel
+from .radial import run_ccr   
 from .utils import validate_dataframe
 
 def run_window_dea(
@@ -32,7 +31,6 @@ def run_window_dea(
         raise ValueError(f"La columna de periodo '{period_column}' no existe en el DataFrame.")
 
     # 2) Validar positividad en inputs/outputs
-    #    (window-analysis asume datos >0; si quieres permitir ceros, cambiar flags)
     validate_dataframe(df_panel, input_cols, output_cols, allow_zero=False, allow_negative=False)
 
     # 3) Lista de períodos ordenada
@@ -47,41 +45,24 @@ def run_window_dea(
         start_p = periods[start_idx]
         end_p = periods[start_idx + window_size - 1]
 
-        # Filtrar todos los registros cuyos period_column estén en esta ventana
         df_window = df_panel[df_panel[period_column].isin(periods[start_idx : start_idx + window_size])]
-
-        # Para calcular eficiencia de cada DMU en la ventana, llamamos a run_ccr
-        # pero run_ccr espera un DataFrame con una sola "snapshot" (interfaces), 
-        # así que para cada DMU tomamos el conjunto de datos de la ventana y calculamos:
-        #
-        #   df_snapshot = df_window[df_window[period_column] == end_p]
-        #   y luego correr run_ccr sobre ese snapshot (inputs+outputs),
-        #   asumiendo que dentro de la ventana nos interesa el estado final.
-        #
-        # Si quisieras promediar eficiencias en toda la ventana, tendrías que iterar
-        # por cada período de la ventana. Aquí tomamos el snapshot en end_p.
 
         df_snapshot = df_window[df_window[period_column] == end_p].copy()
         if df_snapshot.empty:
             continue
 
-        # Construir el DataFrame que pide run_ccr:
-        # - debe incluir la columna DMU y las columnas input_cols+output_cols
-        # - run_ccr (df, dmu_column, input_cols, output_cols, model="CCR", orientation="input", super_eff=False)
         try:
-            df_eff = run_ccr(
+            df_eff = run_ccr( # Run CCR for this snapshot
                 df=df_snapshot,
                 dmu_column=dmu_column,
                 input_cols=input_cols,
                 output_cols=output_cols,
-                orientation="input",
+                orientation="input", # assuming input-oriented for simplicity or based on CCR default
                 super_eff=False
             )
         except Exception as e:
             raise RuntimeError(f"Error al correr run_ccr para ventana {start_p}–{end_p}: {e}")
 
-        # df_eff tiene columns ['DMU', 'efficiency', 'model', 'orientation', 'super_eff']
-        # Guardamos, para cada DMU, la eficiencia correspondiente a esa ventana:
         for _, row in df_eff.iterrows():
             registros.append({
                 dmu_column: row[dmu_column],
