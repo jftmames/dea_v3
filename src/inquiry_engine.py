@@ -40,8 +40,9 @@ def generate_inquiry(
     """
     ctx_str = json.dumps(context, indent=2) if context else "{}"
     
+    # --- PROMPT MEJORADO CON EJEMPLO EXPLÍCITO ---
     prompt = (
-        "Eres un experto mundial en Data Envelopment Analysis (DEA). Tu tarea es generar un árbol de hipótesis en formato JSON sobre las causas de la ineficiencia.\n\n"
+        "Eres un experto mundial en Análisis Envolvente de Datos (DEA). Tu tarea es generar un árbol de hipótesis en formato JSON sobre las causas de la ineficiencia.\n\n"
         f"--- CONTEXTO ---\n{ctx_str}\n\n"
         f"--- PREGUNTA RAÍZ ---\n{root_question}\n\n"
         "--- INSTRUCCIONES ESTRICTAS ---\n"
@@ -49,7 +50,7 @@ def generate_inquiry(
         "2. El JSON debe tener una única clave raíz 'tree', cuyo valor es el árbol de hipótesis.\n"
         "3. NO escribas ningún texto, solo el JSON.\n"
         "4. El árbol debe tener 2-3 niveles.\n"
-        "5. Las hojas del árbol (nodos finales) deben ser preguntas accionables, usando el formato 'Analizar input: [nombre_del_input]' o 'Analizar output: [nombre_del_output]' siempre que sea posible."
+        "5. Las hojas del árbol (nodos finales) deben ser preguntas accionables. USA ESTRICTAMENTE EL SIGUIENTE FORMATO para ellas: 'Analizar input: [nombre_exacto_del_input]' o 'Analizar output: [nombre_exacto_del_output]'. Por ejemplo, si una columna se llama 'gastos_personal', la hoja DEBE SER 'Analizar input: [gastos_personal]'."
     )
 
     for attempt in range(max_retries + 1):
