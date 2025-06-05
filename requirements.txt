@@ -1,3 +1,4 @@
+# jftmames/-dea-deliberativo-mvp/-dea-deliberativo-mvp-b44b8238c978ae0314af30717b9399634d28f8f9/requirements.txt
 streamlit
 pandas
 openai>=1.0
@@ -6,5 +7,5 @@ numpy
 plotly
 ecos
 matplotlib
-python-pptx
+# python-pptx  <- Se recomienda eliminar esta línea, no se usa.
 pytest
