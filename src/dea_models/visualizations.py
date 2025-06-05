@@ -1,6 +1,7 @@
 # jftmames/-dea-deliberativo-mvp/-dea-deliberativo-mvp-b44b8238c978ae0314af30717b9399634d28f8f9/src/dea_models/visualizations.py
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go  # <-- SE AÑADIÓ ESTA LÍNEA
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 
