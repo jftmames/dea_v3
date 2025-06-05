@@ -8,3 +8,4 @@ ecos
 matplotlib
 python-pptx
 pytest
+libsql-client
