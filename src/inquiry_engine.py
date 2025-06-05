@@ -36,7 +36,11 @@ def to_plotly_tree(tree: Dict[str, Any], title: str = "Árbol de Indagación") -
                 walk(hijos, pregunta)
             
     walk(tree, root_label)
-    fig = go.Figure(go.Treemap(labels=labels, parents=parents, root_color="lightgrey", marker_colorscalefast=True))
+    
+    # --- CORRECCIÓN ---
+    # Se ha eliminado el parámetro inválido 'marker_colorscalefast=True'
+    fig = go.Figure(go.Treemap(labels=labels, parents=parents, root_color="lightgrey"))
+    
     fig.update_layout(title_text=title, title_x=0.5, margin=dict(t=50, l=25, r=25, b=25))
     return fig
 
