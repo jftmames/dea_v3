@@ -6,9 +6,8 @@ from typing import Any, Dict, Optional, Tuple
 
 import pandas as pd
 from openai import OpenAI
-import plotly.graph_objects as go
 
-from .data_validator import _llm_suggest # Changed to relative import
+from src.data_validator import _llm_suggest # Corregido a importación absoluta
 
 # Inicializar cliente OpenAI
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
