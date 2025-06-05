@@ -77,7 +77,10 @@ def save_session(
     df_to_insert = pd.DataFrame(session_data)
     
     # Utiliza conn.write para añadir los datos a la tabla. Es el método recomendado.
-    conn.write(df_to_insert, "inquiry_sessions")
+    with conn.session as s:
+        s.execute(f"INSERT INTO inquiry_sessions ({', '.join(df_to_insert.columns)}) VALUES ({', '.join(['?']*len(df_to_insert.columns))})", tuple(df_to_insert.iloc[0]))
+        s.commit()
+
 
 def load_sessions(user_id: str) -> list[dict]:
     """Recupera las sesiones de un usuario desde la base de datos remota."""
