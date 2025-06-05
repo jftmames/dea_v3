@@ -3,6 +3,7 @@ import sys
 import os
 import pandas as pd
 import streamlit as st
+import re # Importar la librería de expresiones regulares
 
 # --- 0) Ajuste del PYTHONPATH ---
 script_dir = os.path.dirname(__file__)
@@ -14,13 +15,15 @@ from results import mostrar_resultados
 from inquiry_engine import generate_inquiry, to_plotly_tree
 from epistemic_metrics import compute_eee
 from openai_helpers import generate_analysis_proposals
+from dea_models.visualizations import plot_hypothesis_distribution # <--- NUEVA IMPORTACIÓN
 
-# --- 2) Configuración de la página ---
+# --- 2) Configuración ---
 st.set_page_config(layout="wide", page_title="DEA Deliberativo con IA")
 
-# --- 3) Funciones de inicialización y caché ---
+# --- 3) Funciones de estado y caché ---
 def initialize_state():
-    """Inicializa el estado de la sesión para un nuevo fichero."""
+    """Inicializa el estado de la sesión."""
+    # ... (sin cambios)
     for key in list(st.session_state.keys()):
         if not key.startswith('_'):
             del st.session_state[key]
@@ -41,13 +44,13 @@ def run_inquiry_engine(root_question, _context):
 def get_analysis_proposals(_df):
     return generate_analysis_proposals(_df.columns.tolist(), _df.head())
 
-# --- 4) Flujo principal de la aplicación ---
+# --- 4) Flujo principal ---
 st.title("💡 DEA Deliberativo con IA")
 st.markdown("Una herramienta para analizar la eficiencia y razonar sobre sus causas con ayuda de Inteligencia Artificial.")
 
-# --- ETAPA 1: Carga de Datos ---
+# ETAPA 1: Carga de Datos
 st.header("Paso 1: Carga tus Datos", divider="blue")
-uploaded_file = st.file_uploader("Sube un fichero CSV con tus datos", type=["csv"])
+uploaded_file = st.file_uploader("Sube un fichero CSV", type=["csv"])
 
 if uploaded_file:
     if st.session_state.get('_file_id') != uploaded_file.file_id:
@@ -61,23 +64,20 @@ if uploaded_file:
         st.session_state.app_status = "file_loaded"
         st.rerun()
 
-# A partir de aquí, la app funciona si hay un DF cargado
 if st.session_state.app_status != "initial":
     df = st.session_state.df
 
-    # --- ETAPA 2: Propuestas de Análisis por la IA ---
+    # ETAPA 2: Propuestas de Análisis por la IA
     st.header("Paso 2: Elige un Enfoque de Análisis", divider="blue")
-
     if 'proposals' not in st.session_state:
         with st.spinner("La IA está analizando tus datos y generando propuestas..."):
             proposals_data = get_analysis_proposals(df)
             st.session_state.proposals = proposals_data.get("proposals", [])
             if not st.session_state.proposals:
-                st.error("La IA no pudo generar propuestas de análisis para estos datos. Por favor, revisa el formato del fichero.")
+                st.error("La IA no pudo generar propuestas.")
                 st.stop()
 
-    if 'selected_proposal' not in st.session_state:
-        st.session_state.selected_proposal = None
+    if 'selected_proposal' not in st.session_state: st.session_state.selected_proposal = None
 
     if not st.session_state.selected_proposal:
         st.info("La IA ha preparado varios enfoques para analizar tus datos. Elige el que mejor se adapte a tu objetivo.")
@@ -91,36 +91,30 @@ if st.session_state.app_status != "initial":
                     st.session_state.app_status = "proposal_selected"
                     st.rerun()
     
-    # --- ETAPA 3: Ejecución del Análisis y Resultados ---
+    # ETAPA 3: Ejecución y Resultados
     if st.session_state.get("selected_proposal"):
         proposal = st.session_state.selected_proposal
         st.header(f"Paso 3: Analizando bajo el enfoque '{proposal['title']}'", divider="blue")
-        
-        # Mostramos la configuración elegida
         st.success(f"**Análisis seleccionado:** {proposal['title']}. {proposal['reasoning']}")
-        
-        # Ejecución del análisis
+
         if 'dea_results' not in st.session_state or st.session_state.dea_results is None:
             with st.spinner("Realizando análisis DEA..."):
-                # Asumimos que la primera columna es la DMU si no está especificado
                 dmu_col = df.columns[0] 
                 st.session_state.dea_results = run_dea_analysis(df, dmu_col, proposal['inputs'], proposal['outputs'])
 
         results = st.session_state.dea_results
         
-        # --- ETAPA 4: Razonamiento sobre los resultados ---
-        st.header("Paso 4: Razona sobre la Ineficiencia con IA", divider="blue")
+        # ETAPA 4: Razonamiento y Exploración Interactiva
+        st.header("Paso 4: Razona y Explora las Causas con IA", divider="blue")
         
         if st.button("Generar Hipótesis de Ineficiencia con IA", use_container_width=True):
              with st.spinner("La IA está razonando sobre los resultados..."):
                 avg_eff = results["df_ccr"]["tec_efficiency_ccr"].mean()
                 inefficient_count = (results["df_ccr"]["tec_efficiency_ccr"] < 0.999).sum()
-                
-                context = {"inputs": proposal['inputs'], "outputs": proposal['outputs'], "avg_efficiency_ccr": avg_eff, "inefficient_units_count": int(inefficient_count), "total_units_count": len(df)}
-                root_question = f"Bajo el enfoque '{proposal['title']}', ¿cuáles son las principales causas de la ineficiencia detectada?"
-                
+                context = {"inputs": proposal['inputs'], "outputs": proposal['outputs'], "avg_efficiency_ccr": avg_eff}
+                root_question = f"Bajo el enfoque '{proposal['title']}', ¿cuáles son las principales causas de la ineficiencia?"
                 tree, error = run_inquiry_engine(root_question, context)
-                if error: st.error(f"Error en el motor de indagación: {error}")
+                if error: st.error(f"Error: {error}")
                 st.session_state.inquiry_tree = tree
 
         if st.session_state.get("inquiry_tree"):
@@ -132,16 +126,47 @@ if st.session_state.app_status != "initial":
                 st.subheader("Calidad del Razonamiento (EEE)", anchor=False)
                 eee_metrics = compute_eee(st.session_state.inquiry_tree, depth_limit=3, breadth_limit=5)
                 st.metric(label="Índice de Equilibrio Erotético (EEE)", value=f"{eee_metrics['score']:.2%}")
-                st.caption("Mide la calidad y balance del árbol de preguntas generado por la IA.")
                 with st.expander("Ver desglose del EEE"):
-                    st.markdown(f"- **D1: Profundidad ({eee_metrics['D1']:.2f})**")
-                    st.markdown(f"- **D2: Pluralidad ({eee_metrics['D2']:.2f})**")
+                     st.markdown(f"- D1: Profundidad ({eee_metrics['D1']:.2f})")
 
-        # --- ETAPA 5: Resultados Detallados ---
-        st.header("Paso 5: Explora los Resultados Detallados", divider="blue")
+            # --- NUEVA SECCIÓN: EXPLORACIÓN INTERACTIVA ---
+            st.subheader("Exploración Interactiva de Hipótesis", anchor=False)
+            placeholder = st.container() # Contenedor para el gráfico
+            
+            # Extraer hojas del árbol para crear botones
+            leaf_nodes = []
+            def find_leaves(node):
+                if not isinstance(node, dict) or not node:
+                    return
+                is_leaf = True
+                for key, value in node.items():
+                    if isinstance(value, dict) and value:
+                        is_leaf = False
+                        find_leaves(value)
+                if is_leaf:
+                    leaf_nodes.extend(list(node.keys()))
+
+            find_leaves(st.session_state.inquiry_tree)
+            
+            st.info("Haz clic en una hipótesis para analizar los datos correspondientes.")
+            for node in leaf_nodes:
+                match = re.search(r"Analizar (input|output): \[(.*?)\]", node)
+                if match:
+                    var_type = match.group(1)
+                    var_name = match.group(2)
+                    if st.button(f"Explorar: {node}", key=node):
+                        with placeholder:
+                            with st.spinner(f"Generando gráfico para '{var_name}'..."):
+                                fig = plot_hypothesis_distribution(
+                                    df_results=results['df_ccr'],
+                                    df_original=df,
+                                    variable=var_name,
+                                    dmu_col=df.columns[0]
+                                )
+                                st.plotly_chart(fig, use_container_width=True)
+
+        # ETAPA 5: Resultados Detallados
+        st.header("Paso 5: Resultados Numéricos Detallados", divider="blue")
         tab_ccr, tab_bcc = st.tabs(["**Resultados CCR**", "**Resultados BCC**"])
-        
-        with tab_ccr:
-            st.dataframe(results.get("df_ccr"))
-        with tab_bcc:
-            st.dataframe(results.get("df_bcc"))
+        with tab_ccr: st.dataframe(results.get("df_ccr"))
+        with tab_bcc: st.dataframe(results.get("df_bcc"))
