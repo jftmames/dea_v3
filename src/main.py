@@ -1,220 +1,79 @@
-import sys
+# src/inquiry_engine.py
 import os
-import pandas as pd
-import datetime
-import streamlit as st
+import json
+from typing import Any, Dict, Optional, Tuple
+from openai import OpenAI
+import plotly.graph_objects as go
 
-# -------------------------------------------------------
-# 0) Ajuste del PYTHONPATH
-# -------------------------------------------------------
-script_dir = os.path.dirname(__file__)
-if script_dir not in sys.path:
-    sys.path.insert(0, script_dir)
+# Inicializar cliente OpenAI
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# -------------------------------------------------------
-# 1) Importaciones
-# -------------------------------------------------------
-from data_validator import validate
-from results import mostrar_resultados
-from report_generator import generate_html_report, generate_excel_report
-from inquiry_engine import generate_inquiry, to_plotly_tree
-from epistemic_metrics import compute_eee
-from dea_models.visualizations import plot_benchmark_spider, plot_efficiency_histogram, plot_3d_inputs_outputs
+FUNCTION_SPEC = {
+    "name": "return_tree",
+    "description": "Árbol jerárquico de subpreguntas para análisis DEA.",
+    "parameters": {
+        "type": "object",
+        "properties": {"tree": {"type": "object"}},
+        "required": ["tree"],
+    },
+}
 
-# -------------------------------------------------------
-# 2) Configuración
-# -------------------------------------------------------
-st.set_page_config(layout="wide", page_title="SED - Simulador Econométrico-Deliberativo")
-
-# -------------------------------------------------------
-# 3) Funciones de inicialización y carga
-# -------------------------------------------------------
-def initialize_state(clear_df=False):
-    """Inicializa o resetea el estado de la sesión."""
-    if clear_df:
-        st.session_state.df = None
-        st.session_state.dmu_col = None
-        st.session_state.input_cols = []
-        st.session_state.output_cols = []
-        st.session_state.model_selection = 'CCR (Constantes)'
-        st.session_state.orientation_selection = 'Input (Minimizar)'
-        st.session_state._file_id = None
-
-    st.session_state.app_status = "initial"
-    st.session_state.dea_results = None
-    st.session_state.inquiry_tree = None
-    st.session_state.eee_metrics = None
-    st.session_state.openai_error = None
-
-if 'app_status' not in st.session_state:
-    initialize_state(clear_df=True)
-
-@st.cache_data
-def run_dea_analysis(_df, dmu_col, input_cols, output_cols, model_type, orientation):
-    """Encapsula los cálculos DEA para ser cacheados."""
-    return mostrar_resultados(_df.copy(), dmu_col, input_cols, output_cols, model_type, orientation)
-
-@st.cache_data
-def get_inquiry_and_eee(_root_q, _context, _df_hash):
-    """Encapsula las llamadas al LLM y EEE, y devuelve el error si lo hay."""
-    if not os.getenv("OPENAI_API_KEY"):
-        return None, None, "La clave API de OpenAI no está configurada en los Secrets de la aplicación."
+def to_plotly_tree(tree: Dict[str, Any], title: str = "Árbol de Indagación") -> go.Figure:
+    """Convierte un diccionario anidado en un Treemap de Plotly."""
+    labels, parents = [], []
+    if not tree or not isinstance(tree, dict): return go.Figure()
     
-    inquiry_tree, error_msg = generate_inquiry(_root_q, context=_context)
-    
-    if error_msg and not inquiry_tree:
-        return None, None, error_msg
-    
-    eee_metrics = compute_eee(inquiry_tree, depth_limit=5, breadth_limit=5)
-    return inquiry_tree, eee_metrics, error_msg
+    def walk(node: Dict[str, Any], parent: str):
+        for pregunta, hijos in node.items():
+            labels.append(pregunta)
+            parents.append(parent)
+            if isinstance(hijos, dict): walk(hijos, pregunta)
+            
+    walk(tree, "")
+    fig = go.Figure(go.Treemap(labels=labels, parents=parents, root_color="lightgrey"))
+    fig.update_layout(title_text=title, title_x=0.5)
+    return fig
 
-def run_full_analysis():
-    """Función centralizada para ejecutar todo el análisis."""
-    df = st.session_state.df
-    with st.spinner("Realizando análisis..."):
-        model_map = {'CCR (Constantes)': 'CCR', 'BCC (Variables)': 'BCC'}
-        orientation_map = {'Input (Minimizar)': 'input', 'Output (Maximizar)': 'output'}
-        selected_model = model_map[st.session_state.model_selection]
-        selected_orientation = orientation_map[st.session_state.orientation_selection]
-        
-        st.session_state.dea_results = run_dea_analysis(
-            df, st.session_state.dmu_col, st.session_state.input_cols, st.session_state.output_cols,
-            selected_model, selected_orientation
+def generate_inquiry(
+    root_question: str,
+    context: Optional[Dict[str, Any]] = None,
+) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """
+    Devuelve una tupla (arbol_de_preguntas, mensaje_de_error).
+    Si la operación es exitosa, mensaje_de_error es None.
+    Si falla, se devuelve un mensaje de error detallado.
+    """
+    ctx = f"Contexto: {json.dumps(context)}\n\n" if context else ""
+    prompt = (
+        ctx + f"{root_question}\n\nGenera un árbol JSON con 2-3 hipótesis sobre las causas de la ineficiencia, "
+        "basadas en las variables del contexto. Cada hipótesis debe ser una clave del JSON."
+    )
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": prompt}],
+            tools=[{"type": "function", "function": FUNCTION_SPEC}],
+            tool_choice="auto",
+            temperature=0.3,
         )
-        context = {"inputs": st.session_state.input_cols, "outputs": st.session_state.output_cols}
-        df_hash = pd.util.hash_pandas_object(df).sum()
-        tree, eee, error = get_inquiry_and_eee("Diagnóstico de ineficiencia", context, df_hash)
+        if resp.choices[0].message.tool_calls:
+            args = resp.choices[0].message.tool_calls[0].function.arguments
+            tree = json.loads(args).get("tree", {})
+            if tree: 
+                return tree, None # Éxito
         
-        st.session_state.inquiry_tree = tree
-        st.session_state.eee_metrics = eee
-        st.session_state.openai_error = error
-        
-        st.session_state.app_status = "results_ready"
-    st.success("Análisis completado.")
+        # Si la IA no devuelve una llamada a la función o el árbol está vacío
+        return _fallback_tree(root_question), "La respuesta de la IA fue inválida, usando árbol de respaldo."
 
-# -------------------------------------------------------
-# 4) Sidebar
-# -------------------------------------------------------
-st.sidebar.header("Acerca de")
-st.sidebar.info("Simulador Econométrico-Deliberativo para Análisis Envolvente de Datos (DEA).")
+    except Exception as e:
+        # Captura cualquier error de la API (clave, fondos, red, etc.) y lo devuelve
+        return None, f"Fallo en la conexión con la API de OpenAI. Revisa tu clave, fondos y el estado del servicio. Detalle: {e}"
 
-# -------------------------------------------------------
-# 5) Área principal
-# -------------------------------------------------------
-st.title("Simulador Econométrico-Deliberativo – DEA")
-uploaded_file = st.file_uploader("Cargar nuevo archivo CSV", type=["csv"])
-if uploaded_file is not None:
-    file_id = uploaded_file.file_id
-    if not hasattr(st.session_state, '_file_id') or st.session_state._file_id != file_id:
-        initialize_state(clear_df=True)
-        try:
-            st.session_state.df = pd.read_csv(uploaded_file, sep=',')
-        except Exception:
-            try:
-                uploaded_file.seek(0)
-                st.session_state.df = pd.read_csv(uploaded_file, sep=';')
-            except Exception as e:
-                st.error(f"Error al leer el fichero CSV. Detalle: {e}")
-                st.session_state.df = None
-        
-        st.session_state._file_id = file_id
-        if st.session_state.df is not None:
-            st.session_state.dmu_col = st.session_state.df.columns[0]
-            st.rerun()
-
-if 'df' in st.session_state and st.session_state.df is not None:
-    df = st.session_state.df
-    
-    st.subheader("Configuración del Análisis")
-    
-    col_config, col_inputs, col_outputs = st.columns(3)
-    with col_config:
-        st.selectbox("Columna de DMU", df.columns.tolist(), key='dmu_col', on_change=initialize_state)
-        st.radio("Tipo de Modelo", ['CCR (Constantes)', 'BCC (Variables)'], key='model_selection', horizontal=True, on_change=initialize_state)
-        st.radio("Orientación del Modelo", ['Input (Minimizar)', 'Output (Maximizar)'], key='orientation_selection', horizontal=True, on_change=initialize_state)
-        
-    with col_inputs:
-        st.multiselect("Columnas de Inputs", [c for c in df.columns.tolist() if c != st.session_state.dmu_col], key='input_cols', on_change=initialize_state)
-    with col_outputs:
-        st.multiselect("Columnas de Outputs", [c for c in df.columns.tolist() if c not in [st.session_state.dmu_col] + st.session_state.input_cols], key='output_cols', on_change=initialize_state)
-
-    if st.button("🚀 Ejecutar Análisis DEA", use_container_width=True):
-        if not st.session_state.input_cols or not st.session_state.output_cols:
-            st.error("Por favor, selecciona al menos un input y un output.")
-        else:
-            run_full_analysis()
-
-# --- Mostrar resultados ---
-if st.session_state.get('app_status') == "results_ready" and st.session_state.get('dea_results'):
-    results = st.session_state.dea_results
-    model_ran = results.get('model_type', 'Desconocido')
-    
-    st.header(f"Resultados del Análisis {model_ran}", divider='rainbow')
-    
-    st.subheader(f"📊 Tabla de Eficiencias ({model_ran})")
-    st.dataframe(results["df_results"])
-    
-    st.subheader(f"Visualizaciones de Eficiencia ({model_ran})")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.plotly_chart(results['histogram'], use_container_width=True)
-    with col2:
-        st.plotly_chart(results['scatter_3d'], use_container_width=True)
-        
-    st.subheader(f"🕷️ Benchmark Spider ({model_ran})")
-    dmu_col_name = st.session_state.get('dmu_col')
-    if dmu_col_name and dmu_col_name in results["df_results"].columns:
-        dmu_options = results["df_results"][dmu_col_name].astype(str).tolist()
-        selected_dmu = st.selectbox("Seleccionar DMU para comparar:", options=dmu_options, key=f"dmu_{model_ran.lower()}")
-        if selected_dmu:
-            spider_fig = plot_benchmark_spider(results["merged_df"], selected_dmu, st.session_state.input_cols, st.session_state.output_cols)
-            st.plotly_chart(spider_fig, use_container_width=True)
-    
-    st.header("Análisis Deliberativo Asistido por IA", divider='rainbow')
-    
-    if st.session_state.get('openai_error'):
-        st.error(f"**Error en el Análisis Deliberativo:** {st.session_state.openai_error}")
-
-    def apply_scenario_and_run(new_inputs, new_outputs):
-        st.session_state.input_cols = new_inputs
-        st.session_state.output_cols = new_outputs
-        run_full_analysis()
-
-    st.subheader("🔬 Escenarios Interactivos")
-    if st.session_state.get('inquiry_tree'):
-        st.info("La IA sugiere probar los siguientes escenarios. Al pulsar un botón, el análisis se ejecutará automáticamente con la nueva configuración.")
-        main_hypotheses = list(st.session_state.inquiry_tree.get(list(st.session_state.inquiry_tree.keys())[0], {}).keys())
-        for i, hypothesis in enumerate(main_hypotheses):
-            with st.container(border=True):
-                st.markdown(f"##### Hipótesis de la IA: *«{hypothesis}»*")
-                new_inputs = st.session_state.input_cols.copy()
-                new_outputs = st.session_state.output_cols.copy()
-                can_apply = False
-                action_text = "No aplicable con la selección actual."
-                if "input" in hypothesis.lower() and len(new_inputs) > 1:
-                    removed_var = new_inputs.pop(0)
-                    can_apply = True
-                    action_text = f"Probar sin el input: `{removed_var}`"
-                elif "output" in hypothesis.lower() and len(new_outputs) > 1:
-                    removed_var = new_outputs.pop(0)
-                    can_apply = True
-                    action_text = f"Probar sin el output: `{removed_var}`"
-                
-                st.button(action_text, key=f"hyp_{i}", on_click=apply_scenario_and_run, args=(new_inputs, new_outputs), disabled=not can_apply, use_container_width=True)
-    else:
-        st.warning("No se generaron recomendaciones de la IA.")
-    
-    st.subheader("🧠 Métrica de Calidad del Diagnóstico (EEE)")
-    eee = st.session_state.get('eee_metrics')
-    if eee and eee.get('score', 0) > 0:
-        st.metric(label="Puntuación EEE Total", value=f"{eee.get('score', 0):.4f}")
-        with st.expander("Ver desglose y significado de la Métrica EEE"):
-            st.markdown("""El **Índice de Equilibrio Erotético (EEE)** mide la calidad del árbol de diagnóstico. Una puntuación alta indica un análisis más completo.""")
-            st.markdown("**D1: Profundidad del Análisis**")
-            st.progress(eee.get('D1', 0), text=f"Puntuación: {eee.get('D1', 0):.2f}")
-            st.markdown("**D2: Pluralidad Semántica**")
-            st.progress(eee.get('D2', 0), text=f"Puntuación: {eee.get('D2', 0):.2f}")
-            st.markdown("**D3: Trazabilidad**")
-            st.progress(eee.get('D3', 0), text=f"Puntuación: {eee.get('D3', 0):.2f}")
-    else:
-        st.warning("No se pudo calcular la Métrica EEE.")
+def _fallback_tree(root_q: str) -> Dict[str, Any]:
+    """Árbol de respaldo si la llamada a la IA falla."""
+    return {
+        root_q: {
+            "¿Posible exceso de inputs?": {"Analizar variable por variable": "Revisar datos"},
+            "¿Posible déficit de outputs?": {"Comparar con la media": "Revisar datos"},
+        }
+    }
