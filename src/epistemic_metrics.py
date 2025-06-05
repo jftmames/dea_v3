@@ -1,3 +1,4 @@
+# src/epistemic_metrics.py
 import pandas as pd
 import numpy as np
 
@@ -20,7 +21,7 @@ def compute_eee(
     D1 = min(max_depth / depth_limit, 1.0)
 
     # (2) D2: Pluralidad = número de nodos hijos únicos en nivel 1 / breadth_limit
-    root = next(iter(inquiry_tree.values()))
+    root = next(iter(inquiry_tree.values())) if inquiry_tree else {}
     num_children = len(root) if isinstance(root, dict) else 0
     D2 = min(num_children / breadth_limit, 1.0)
 
@@ -45,4 +46,4 @@ def _max_tree_depth(tree: dict) -> int:
     """Devuelve la profundidad máxima de un diccionario anidado."""
     if not isinstance(tree, dict) or not tree:
         return 0
-    return 1 + max(_max_tree_depth(v) for v in tree.values() if isinstance(v, dict))
+    return 1 + max([_max_tree_depth(v) for v in tree.values() if isinstance(v, dict)] or [0]) # Handle empty values() list
