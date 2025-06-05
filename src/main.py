@@ -70,10 +70,10 @@ if sessions:
             st.session_state.dmu_col = sess.get('dmu_col')
             st.session_state.input_cols = sess.get('input_cols', [])
             st.session_state.output_cols = sess.get('output_cols', [])
-            st.session_state.selected_dmu = None # Resetear para evitar errores
-            st.session_state.dea_results = None # Forzar recálculo
+            st.session_state.selected_dmu = None
+            st.session_state.dea_results = None
             st.success(f"Datos de la sesión '{selected_session_id}' cargados. Vuelve a ejecutar el análisis.")
-            st.experimental_rerun()
+            st.rerun()
 else:
     st.sidebar.write("No hay sesiones guardadas.")
 
@@ -84,7 +84,8 @@ st.title("Simulador Econométrico-Deliberativo – DEA")
 uploaded_file = st.file_uploader("Cargar archivo CSV (con DMUs)", type=["csv"])
 if uploaded_file is not None:
     st.session_state.df = pd.read_csv(uploaded_file)
-    st.session_state.dea_results = None # Limpiar resultados al cargar nuevo archivo
+    st.session_state.dea_results = None
+    st.session_state.selected_dmu = None
 
 # -------------------------------------------------------
 # 7) Selección de columnas y ejecución de análisis
@@ -111,6 +112,20 @@ if st.session_state.df is not None:
                 context = {"inputs": st.session_state.input_cols, "outputs": st.session_state.output_cols}
                 df_hash = pd.util.hash_pandas_object(df).sum()
                 st.session_state.inquiry_tree, st.session_state.eee_score = get_inquiry_and_eee("Diagnóstico de ineficiencia", context, df_hash)
+                
+                tree_data_list = []
+                def flatten_tree(node, parent_path=""):
+                    for key, value in node.items():
+                        current_path = f"{parent_path}/{key}" if parent_path else key
+                        if isinstance(value, dict):
+                            tree_data_list.append({"Nodo": key, "Padre": parent_path or "Raíz", "Tipo": "Pregunta/Categoría"})
+                            flatten_tree(value, current_path)
+                        else:
+                            tree_data_list.append({"Nodo": key, "Padre": parent_path, "Tipo": "Sugerencia/Información", "Detalle": value})
+                if st.session_state.inquiry_tree:
+                    flatten_tree(st.session_state.inquiry_tree)
+                st.session_state.df_tree = pd.DataFrame(tree_data_list)
+                st.session_state.df_eee = pd.DataFrame([{"Métrica": "EEE Score", "Valor": st.session_state.eee_score}])
             st.success("Análisis completado.")
 
 # -------------------------------------------------------
@@ -123,7 +138,6 @@ if st.session_state.dea_results:
     st.subheader("🕷️ Benchmark Spider CCR")
     # --- CORRECCIÓN 1: GESTIÓN DE ESTADO DEL SELECTBOX ---
     dmu_options = st.session_state.dea_results["df_ccr"][st.session_state.dmu_col].astype(str).tolist()
-    # Usamos el parámetro `key` para vincular el widget al session_state
     st.selectbox(
         "Seleccionar DMU para comparar contra peers eficientes:",
         options=dmu_options,
@@ -140,13 +154,11 @@ if st.session_state.dea_results:
         st.plotly_chart(spider_fig, use_container_width=True)
 
     st.subheader("🌳 Complejo de Indagación (Árbol)")
-    # --- CORRECCIÓN 2: TÍTULO DEL ÁRBOL ---
     if st.session_state.inquiry_tree:
         tree_map_fig = to_plotly_tree(st.session_state.inquiry_tree, title="Árbol de Diagnóstico: Causas y Estrategias de Mejora")
         st.plotly_chart(tree_map_fig, use_container_width=True)
 
     st.subheader("🧠 Métricas Epistémicas (EEE)")
-    # --- CORRECCIÓN 3: EXPLICACIÓN DE EEE ---
     st.info(
         """
         El **Índice de Equilibrio Erotético (EEE)** mide la calidad y robustez del árbol de diagnóstico (0 a 1).
@@ -155,12 +167,21 @@ if st.session_state.dea_results:
     )
     st.metric(label="Puntuación EEE", value=f"{st.session_state.eee_score:.4f}")
 
-    # --- CORRECCIONES 4 Y 5: GUARDADO Y REPORTES ---
     st.subheader("💾 Guardar y Exportar")
     notes = st.text_area("Notas sobre la sesión (opcional)")
     
+    # --- CORRECCIÓN 2: LÓGICA DE GUARDADO COMPLETA ---
     if st.button("Guardar Sesión"):
         with st.spinner("Guardando..."):
+            serializable_dea_results = {}
+            if st.session_state.dea_results:
+                for key, value in st.session_state.dea_results.items():
+                    if isinstance(value, pd.DataFrame):
+                        serializable_dea_results[key] = value.to_dict('records')
+            
+            df_tree_to_save = st.session_state.df_tree.to_dict('records') if st.session_state.df_tree is not None and not st.session_state.df_tree.empty else None
+            df_eee_to_save = st.session_state.df_eee.to_dict('records') if st.session_state.df_eee is not None and not st.session_state.df_eee.empty else None
+
             save_session(
                 user_id=default_user_id,
                 inquiry_tree=st.session_state.inquiry_tree,
@@ -169,17 +190,19 @@ if st.session_state.dea_results:
                 dmu_col=st.session_state.dmu_col,
                 input_cols=st.session_state.input_cols,
                 output_cols=st.session_state.output_cols,
-                df_data=st.session_state.df.to_dict('records')
+                df_data=st.session_state.df.to_dict('records'),
+                dea_results=serializable_dea_results,
+                df_tree_data=df_tree_to_save,
+                df_eee_data=df_eee_to_save
             )
         st.success("¡Sesión guardada correctamente!")
-        # --- CORRECCIÓN 4: FORZAR REFRESCO ---
-        st.cache_data.clear() # Limpiar caché para recargar sesiones
-        st.experimental_rerun()
+        st.cache_data.clear()
+        st.rerun()
 
     col1, col2 = st.columns(2)
     with col1:
-        html_report = generate_html_report(st.session_state.dea_results["df_ccr"], pd.DataFrame(), pd.DataFrame([{"Métrica": "EEE Score", "Valor": st.session_state.eee_score}]))
+        html_report = generate_html_report(st.session_state.dea_results["df_ccr"], st.session_state.df_tree, st.session_state.df_eee)
         st.download_button("Descargar Reporte HTML", html_report, f"reporte_dea_{datetime.datetime.now().strftime('%Y%m%d')}.html", "text/html", use_container_width=True)
     with col2:
-        excel_report = generate_excel_report(st.session_state.dea_results["df_ccr"], pd.DataFrame(), pd.DataFrame([{"Métrica": "EEE Score", "Valor": st.session_state.eee_score}]))
+        excel_report = generate_excel_report(st.session_state.dea_results["df_ccr"], st.session_state.df_tree, st.session_state.df_eee)
         st.download_button("Descargar Reporte Excel", excel_report, f"reporte_dea_{datetime.datetime.now().strftime('%Y%m%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
