@@ -14,6 +14,7 @@ if script_dir not in sys.path:
 # 1) Importaciones
 # -------------------------------------------------------
 from results import mostrar_resultados
+from dea_models.visualizations import plot_benchmark_spider
 
 # -------------------------------------------------------
 # 2) Configuración
@@ -43,7 +44,7 @@ def run_dea_analysis(_df, dmu_col, input_cols, output_cols):
 # -------------------------------------------------------
 # 4) Área principal
 # -------------------------------------------------------
-st.title("Simulador DEA (Versión Base)")
+st.title("Simulador DEA")
 
 uploaded_file = st.file_uploader("1. Cargar archivo CSV", type=["csv"])
 
@@ -102,7 +103,25 @@ if st.session_state.get('app_status') == "results_ready" and st.session_state.ge
     with tab_ccr:
         st.subheader("Tabla de Eficiencias (Modelo CCR)")
         st.dataframe(results.get("df_ccr"))
+        
+        st.subheader("Visualizaciones de Eficiencia (CCR)")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.plotly_chart(results.get("hist_ccr"), use_container_width=True)
+        with col2:
+            st.plotly_chart(results.get("scatter3d_ccr"), use_container_width=True)
+            
+        st.subheader("Benchmark Spider (CCR)")
+        dmu_options_ccr = results.get("df_ccr", pd.DataFrame()).get(st.session_state.dmu_col, []).astype(str).tolist()
+        if dmu_options_ccr:
+            selected_dmu_ccr = st.selectbox("Seleccionar DMU para comparar (CCR):", options=dmu_options_ccr, key="dmu_ccr")
+            if selected_dmu_ccr:
+                spider_fig_ccr = plot_benchmark_spider(results["merged_ccr"], selected_dmu_ccr, st.session_state.input_cols, st.session_state.output_cols)
+                st.plotly_chart(spider_fig_ccr, use_container_width=True)
 
     with tab_bcc:
         st.subheader("Tabla de Eficiencias (Modelo BCC)")
         st.dataframe(results.get("df_bcc"))
+
+        st.subheader("Visualización de Eficiencia (BCC)")
+        st.plotly_chart(results.get("hist_bcc"), use_container_width=True)
