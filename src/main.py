@@ -120,7 +120,6 @@ if st.session_state.app_status != "initial":
         if st.session_state.app_status in ["results_ready", "inquiry_done"]:
             st.header("Paso 4: Razona y Explora las Causas con IA", divider="blue")
             
-            # --- CORRECCIÓN DE LA LÍNEA 124 ---
             if st.button("Generar Hipótesis de Ineficiencia con IA", use_container_width=True):
                  with st.spinner("La IA está razonando sobre los resultados..."):
                     avg_eff = results["df_ccr"]["tec_efficiency_ccr"].mean()
