@@ -15,14 +15,6 @@ def _dea_core(
     orientation: str = "input",
     super_eff: bool = False,
 ) -> np.ndarray:
-    """
-    X: np.array shape (m, n)  (inputs)
-    Y: np.array shape (s, n)  (outputs)
-    rts: "CRS" (CCR) o "VRS" (BCC)
-    orientation: "input" o "output"
-    super_eff: si True, excluye la DMU actual para super-eficiencia
-    Devuelve vector de eficiencias (length n).
-    """
     m, n_total_dmus = X.shape 
     s = Y.shape[0]
     eff = np.zeros(n_total_dmus)
@@ -81,12 +73,6 @@ def _run_dea_internal(
     super_eff: bool = False,
     dmu_col_name: str = "DMU"
 ) -> pd.DataFrame:
-    """
-    Ejecuta una versión simplificada de DEA para devolver solo la eficiencia.
-    """
-    assert orientation in ("input", "output"), "orientation debe ser 'input' u 'output'"
-    assert model.upper() in ("CCR", "BCC"), "model debe ser 'CCR' o 'BCC'"
-
     df_num = df.copy()
     validate_positive_dataframe(df_num, inputs + outputs)
 
@@ -121,9 +107,6 @@ def run_ccr(
     orientation: str = "input", 
     super_eff: bool = False
 ) -> pd.DataFrame:
-    """
-    Ejecuta CCR radial.
-    """
     if dmu_column not in df.columns:
         raise ValueError(f"La columna DMU '{dmu_column}' no existe en el DataFrame.")
     validate_positive_dataframe(df.copy(), input_cols + output_cols)
@@ -158,11 +141,7 @@ def run_ccr(
         prob.solve(solver=cp.ECOS, abstol=1e-7, reltol=1e-7, feastol=1e-7, verbose=False)
 
         if prob.status not in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE] or obj.value is None:
-             resultados.append({
-                dmu_column: dmus[i], "tec_efficiency_ccr": np.nan, "lambda_vector": {},
-                "slacks_inputs": {col: np.nan for col in input_cols},
-                "slacks_outputs": {col: np.nan for col in output_cols}, "rts_label": "CRS"
-            })
+             resultados.append({dmu_column: dmus[i], "tec_efficiency_ccr": np.nan, "lambda_vector": {},"slacks_inputs": {col: np.nan for col in input_cols},"slacks_outputs": {col: np.nan for col in output_cols}, "rts_label": "CRS"})
              continue
 
         eff_val = float(obj.value)
@@ -171,7 +150,7 @@ def run_ccr(
         if orientation == "input":
             slacks_in_vals = (eff_val * x0) - (X_ref @ lambdas_opt)
             slacks_out_vals = (Y_ref @ lambdas_opt) - y0
-        else: # output
+        else: 
             slacks_in_vals = x0 - (X_ref @ lambdas_opt)
             slacks_out_vals = (Y_ref @ lambdas_opt) - (eff_val * y0)
         
@@ -201,9 +180,10 @@ def run_bcc(
     orientation: str = "input",
     super_eff: bool = False,
 ) -> pd.DataFrame:
-    """
-    Ejecuta modelo BCC (VRS) de forma robusta.
-    """
+    if df_ccr_results is None:
+        print("--- DEBUG: `run_bcc` recibió `df_ccr_results` como None. Abortando BCC. ---")
+        return pd.DataFrame() # Devolver un DF vacío en lugar de None
+
     if dmu_column not in df.columns:
         raise ValueError(f"La columna DMU '{dmu_column}' no existe en el DataFrame.")
     validate_positive_dataframe(df.copy(), input_cols + output_cols)
@@ -230,7 +210,7 @@ def run_bcc(
             theta = cp.Variable()
             obj = cp.Minimize(theta)
             cons = [X_ref @ lambdas_var <= theta * x0, Y_ref @ lambdas_var >= y0, convexity_constraint]
-        else: # output
+        else:
             phi = cp.Variable()
             obj = cp.Maximize(phi)
             cons = [X_ref @ lambdas_var <= x0, Y_ref @ lambdas_var >= phi * y0, convexity_constraint]
@@ -239,13 +219,40 @@ def run_bcc(
         prob.solve(solver=cp.ECOS, abstol=1e-7, reltol=1e-7, feastol=1e-7, verbose=False)
 
         if prob.status not in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE] or obj.value is None:
-            registros.append({
-                dmu_column: dmus[i], "efficiency": np.nan, "model": "BCC", "orientation": orientation, 
-                "super_eff": bool(super_eff), "lambda_vector": {}, "slacks_inputs": {col: np.nan for col in input_cols},
-                "slacks_outputs": {col: np.nan for col in output_cols}, "scale_efficiency": np.nan, "rts_label": "Error"
-            })
+            registros.append({dmu_column: dmus[i], "efficiency": np.nan, "model": "BCC", "orientation": orientation, "super_eff": bool(super_eff), "lambda_vector": {}, "slacks_inputs": {col: np.nan for col in input_cols},"slacks_outputs": {col: np.nan for col in output_cols}, "scale_efficiency": np.nan, "rts_label": "Error"})
             continue
 
         eff_val = float(obj.value)
         bcc_eff = 1/eff_val if orientation == 'output' else eff_val
         lambdas_opt = lambdas_var.value if lambdas_var.value is not None else np.zeros((len(ref_indices), 1))
+        
+        ccr_eff_series = df_ccr_results.loc[df_ccr_results[dmu_column] == dmus[i], "tec_efficiency_ccr"]
+        ccr_eff = ccr_eff_series.iloc[0] if not ccr_eff_series.empty else np.nan
+        scale_eff = (ccr_eff / bcc_eff) if not np.isnan(bcc_eff) and not np.isnan(ccr_eff) and bcc_eff != 0 else np.nan
+
+        if orientation == "input":
+            slacks_in_vals = (eff_val * x0) - (X_ref @ lambdas_opt)
+            slacks_out_vals = (Y_ref @ lambdas_opt) - y0
+        else:
+            slacks_in_vals = x0 - (X_ref @ lambdas_opt)
+            slacks_out_vals = (Y_ref @ lambdas_opt) - (eff_val * y0)
+        
+        slacks_in_vals[slacks_in_vals < 1e-9] = 0
+        slacks_out_vals[slacks_out_vals < 1e-9] = 0
+
+        rts_label = "VRS"
+        dual_val = convexity_constraint.dual_value
+        if dual_val is not None:
+            if abs(dual_val) < 1e-6: rts_label = "CRS"
+            elif dual_val < 0: rts_label = "IRS"
+            else: rts_label = "DRS"
+        
+        registros.append({
+            dmu_column: dmus[i], "efficiency": np.round(bcc_eff, 6), "model": "BCC", "orientation": orientation, "super_eff": bool(super_eff),
+            "lambda_vector": {dmus_ref[j]: float(v) for j, v in enumerate(lambdas_opt.flatten())},
+            "slacks_inputs": {input_cols[k]: float(v) for k, v in enumerate(slacks_in_vals.flatten())},
+            "slacks_outputs": {output_cols[r]: float(v) for r, v in enumerate(slacks_out_vals.flatten())},
+            "scale_efficiency": np.round(scale_eff, 6) if not np.isnan(scale_eff) else np.nan,
+            "rts_label": rts_label
+        })
+    return pd.DataFrame(registros)
