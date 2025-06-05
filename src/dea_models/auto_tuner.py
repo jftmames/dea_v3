@@ -1,5 +1,4 @@
-# src/dea_models/auto_tuner.py
-
+# jftmames/-dea-deliberativo-mvp/-dea-deliberativo-mvp-b44b8238c978ae0314af30717b9399634d28f8f9/src/dea_models/auto_tuner.py
 import pandas as pd
 import numpy as np
 import uuid
@@ -19,8 +18,6 @@ def generate_candidates(
     """
     Genera n_candidates propuestas de {inputs: new_inputs, outputs: new_outputs}
     basado en subpreguntas e eee_score.
-    Aquí se puede invocar a un LLM para sugerir combinaciones.
-    Por simplicidad, generamos candidatos removiendo de a 1 input o output.
     """
     all_vars = input_cols + output_cols
     candidates = []
@@ -53,33 +50,29 @@ def evaluate_candidates(
 ) -> pd.DataFrame:
     """
     Para cada candidato (inputs/outputs), calcula eficiencia promedio y EEE simulado.
-    Retorna DataFrame:
-      candidate_id, inputs, outputs, avg_efficiency, eee_score_sim, delta_eff, delta_eee
     """
     rows = []
-    # Eficiencia original con input_cols/output_cols de referencia
-    # (Se asume que los candidatos incluyen la configuración base también)
-
-    # Aquí solo iteramos y computamos avg efficiency
+    
     for cand in candidates:
         inp = cand["inputs"]
         outp = cand["outputs"]
-        # Validar
         validate_positive_dataframe(df, inp + outp)
 
-        # Correr DEA para todo el dataset
+        # --- CORRECCIÓN ---
+        # Pasando explícitamente el nombre de la columna DMU a la función interna.
         df_eff = _run_dea_internal(
             df=df,
+            dmu_col_name=dmu_column,
             inputs=inp,
             outputs=outp,
             model=model,
             orientation="input",
             super_eff=False
         )
-        avg_eff = float(df_eff["efficiency"].mean())
+        avg_eff = float(df_eff["efficiency"].mean()) if not df_eff.empty and "efficiency" in df_eff.columns else np.nan
 
-        # Calcular EEE simulado (placeholder: misma fórmula original, se reemplaza con lógica real)
-        eee_sim = avg_eff * 100  # ejemplo simplificado
+        # Calcular EEE simulado (lógica de ejemplo)
+        eee_sim = avg_eff * 100 if not np.isnan(avg_eff) else np.nan
 
         rows.append({
             "candidate_id": cand["candidate_id"],
@@ -92,11 +85,12 @@ def evaluate_candidates(
         })
 
     df_cand = pd.DataFrame(rows)
-    # Calcular cambios relativos respecto a baseline (primera fila)
-    if not df_cand.empty:
+    if not df_cand.empty and len(df_cand) > 1:
         base_eff = df_cand.loc[0, "avg_efficiency"]
         base_eee = df_cand.loc[0, "eee_score_sim"]
-        df_cand["delta_eff"] = df_cand["avg_efficiency"] - base_eff
-        df_cand["delta_eee"] = df_cand["eee_score_sim"] - base_eee
+        if not pd.isna(base_eff):
+            df_cand["delta_eff"] = df_cand["avg_efficiency"] - base_eff
+        if not pd.isna(base_eee):
+            df_cand["delta_eee"] = df_cand["eee_score_sim"] - base_eee
 
     return df_cand
