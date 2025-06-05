@@ -1,9 +1,11 @@
 # src/dea_models/cross_efficiency.py
+
 import numpy as np
 import pandas as pd
 
-from src.dea_models.radial import _run_dea_internal  # Corregido a importación absoluta
-from src.dea_models.utils import validate_positive_dataframe # Corregido a importación absoluta
+# Corregido: Importaciones relativas dentro del paquete dea_models
+from .radial import _run_dea_internal  # reutilizamos el núcleo CCR/BCC
+from .utils import validate_positive_dataframe
 
 def compute_cross_efficiency(
     df: pd.DataFrame,
