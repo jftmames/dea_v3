@@ -3,26 +3,28 @@
 import sys
 import os
 
-# Añadir el directorio padre de 'src' (la raíz del proyecto) al Python path.
-# Esto es crucial para que Python reconozca 'src' como un paquete de nivel superior.
-current_dir = os.path.dirname(__file__)
-parent_dir = os.path.dirname(current_dir)
-if parent_dir not in sys.path:
-    sys.path.insert(0, parent_dir)
+# Obtener la ruta del directorio donde se encuentra este script (main.py).
+# Esta ruta es, efectivamente, la de la carpeta 'src'.
+script_dir = os.path.dirname(__file__)
 
+# Añadir esta ruta ('src') al sys.path si aún no está.
+# Esto hará que todos los módulos hermanos (data_validator, results, etc.)
+# y las subcarpetas (como dea_models) sean directamente importables por su nombre.
+if script_dir not in sys.path:
+    sys.path.insert(0, script_dir)
 
 import streamlit as st
 import pandas as pd
 import datetime
 
-# Importaciones corregidas a absolutas (usando el prefijo 'src.')
-# Ahora que el directorio padre está en sys.path, 'src' es un módulo importable.
-from src.data_validator import validate
-from src.results import mostrar_resultados, plot_benchmark_spider, plot_efficiency_histogram, plot_3d_inputs_outputs
-from src.report_generator import generate_html_report, generate_excel_report
-from src.session_manager import init_db, save_session, load_sessions
-from src.inquiry_engine import generate_inquiry, to_plotly_tree
-from src.epistemic_metrics import compute_eee
+# Las importaciones ahora deberían funcionar directamente desde los nombres de los módulos
+# ya que el directorio 'src' ha sido explícitamente añadido al sys.path.
+from data_validator import validate
+from results import mostrar_resultados, plot_benchmark_spider, plot_efficiency_histogram, plot_3d_inputs_outputs
+from report_generator import generate_html_report, generate_excel_report
+from session_manager import init_db, save_session, load_sessions
+from inquiry_engine import generate_inquiry, to_plotly_tree
+from epistemic_metrics import compute_eee
 
 
 # -------------------------------------------------------
