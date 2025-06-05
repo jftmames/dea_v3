@@ -2,8 +2,8 @@
 import numpy as np
 import pandas as pd
 
-from .radial import _run_dea_internal  # reutilizamos el núcleo CCR/BCC
-from .utils import validate_positive_dataframe
+from src.dea_models.radial import _run_dea_internal  # Corregido a importación absoluta
+from src.dea_models.utils import validate_positive_dataframe # Corregido a importación absoluta
 
 def compute_cross_efficiency(
     df: pd.DataFrame,
@@ -63,27 +63,6 @@ def compute_cross_efficiency(
     # Para completar, necesitaríamos resolver el problema DEA para cada DMU 'j'
     # para obtener sus pesos óptimos (u_j, v_j), y luego usar esos (u_j, v_j)
     # para evaluar a todas las DMUs 'i'.
-
-    # Ejemplo conceptual (requeriría modificar _dea_core para devolver duales o re-formular):
-    # cross_eff_matrix = np.zeros((n, n))
-    # for j in range(n): # DMU evaluadora (usa sus pesos óptimos)
-    #     # Calcular u_j, v_j (pesos duales) para la DMU j
-    #     # Esto implicaría resolver un modelo DEA en formato dual
-    #     # (o modificar _dea_core para que devuelva los duales)
-    #     # u_j, v_j = get_optimal_dual_weights(df, input_cols, output_cols, j, rts)
-    #
-    #     # For each DMU i (being evaluated)
-    #     # for i in range(n):
-    #     #    eff_i_given_j = (v_j @ Y[:,i]) / (u_j @ X[:,i])
-    #     #    cross_eff_matrix[i, j] = eff_i_given_j
-    #
-    # # Una vez obtenida cross_eff_matrix, se aplica el método "average", "aggressive" o "benevolent"
-    # # para calcular la eficiencia cross-efficiency final de cada DMU.
-
-    # Dado que la implementación actual de _dea_internal solo devuelve lambdas y eficiencias
-    # y no los pesos duales (u, v) necesarios para el cálculo directo de cross-efficiency
-    # tal como se describe en la teoría de DEA, esta función tal cual está en el archivo
-    # no completaría el cálculo de la matriz de cross-efficiencies.
 
     # Se retorna un DataFrame vacío como placeholder, ya que la lógica está incompleta.
     # En un entorno real, esto requeriría una modificación en el núcleo DEA para
