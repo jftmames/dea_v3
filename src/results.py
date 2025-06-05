@@ -12,59 +12,52 @@ def mostrar_resultados(
     df: pd.DataFrame,
     dmu_column: str,
     inputs: list[str],
-    outputs: list[str]
+    outputs: list[str],
+    model_type: str,
+    orientation: str
 ) -> dict:
     """
-    Versión completa que ejecuta ambos modelos (CCR y BCC),
-    genera los DataFrames resultantes y produce todas las figuras de Plotly.
-    Devuelve un diccionario con todos los resultados y figuras.
+    Ejecuta el modelo DEA seleccionado (CCR o BCC) con la orientación especificada.
+    Devuelve un diccionario con todos los resultados y figuras para ese modelo.
     """
-    resultados = {}
+    resultados = {"model_type": model_type, "orientation": orientation}
 
-    # 1) Ejecutar CCR
-    df_ccr = run_ccr(
+    # El modelo BCC necesita los resultados de CCR para calcular la eficiencia de escala.
+    # Por tanto, ejecutamos CCR siempre que se pida BCC.
+    df_ccr_results = run_ccr(
         df=df,
         dmu_column=dmu_column,
         input_cols=inputs,
         output_cols=outputs,
-        orientation="input",
-        super_eff=False
-    )
-
-    # 2) Ejecutar BCC pasando los resultados de CCR para optimizar
-    df_bcc = run_bcc(
-        df=df,
-        dmu_column=dmu_column,
-        input_cols=inputs,
-        output_cols=outputs,
-        df_ccr_results=df_ccr,
-        orientation="input",
-        super_eff=False
+        orientation=orientation
     )
     
-    # 3) Renombrar columnas de eficiencia para consistencia en los histogramas
-    df_ccr_for_plots = df_ccr.rename(columns={"tec_efficiency_ccr": "efficiency"})
-    df_bcc_for_plots = df_bcc.rename(columns={"efficiency": "efficiency"}) # Ya se llama 'efficiency' pero lo aseguramos
+    if model_type == 'CCR':
+        df_main_results = df_ccr_results
+    elif model_type == 'BCC':
+        df_main_results = run_bcc(
+            df=df,
+            dmu_column=dmu_column,
+            input_cols=inputs,
+            output_cols=outputs,
+            df_ccr_results=df_ccr_results, # Se lo pasamos
+            orientation=orientation
+        )
+    else:
+        raise ValueError("El tipo de modelo debe ser 'CCR' o 'BCC'")
 
-    resultados["df_ccr"] = df_ccr
-    resultados["df_bcc"] = df_bcc
+    # Renombrar columna de eficiencia para que los gráficos funcionen con un nombre estándar
+    if "tec_efficiency_ccr" in df_main_results.columns:
+        df_plot_ready = df_main_results.rename(columns={"tec_efficiency_ccr": "efficiency"})
+    else:
+        df_plot_ready = df_main_results
 
-    # 4) Unir resultados con df original para visualizaciones (spider plot)
-    merged_ccr = df_ccr.merge(df, on=dmu_column, how="left")
-    merged_bcc = df_bcc.merge(df, on=dmu_column, how="left")
-    resultados["merged_ccr"] = merged_ccr
-    resultados["merged_bcc"] = merged_bcc
+    # Almacenar resultados principales
+    resultados["df_results"] = df_main_results
+    resultados["merged_df"] = df_main_results.merge(df, on=dmu_column, how="left")
 
-    # 5) Crear figuras de histograma
-    hist_ccr = plot_efficiency_histogram(df_ccr_for_plots)
-    hist_bcc = plot_efficiency_histogram(df_bcc_for_plots)
-    resultados["hist_ccr"] = hist_ccr
-    resultados["hist_bcc"] = hist_bcc
-
-    # 6) Crear figuras de scatter 3D
-    scatter3d_ccr = plot_3d_inputs_outputs(df, inputs, outputs, df_ccr_for_plots, dmu_column)
-    scatter3d_bcc = plot_3d_inputs_outputs(df, inputs, outputs, df_bcc_for_plots, dmu_column)
-    resultados["scatter3d_ccr"] = scatter3d_ccr
-    resultados["scatter3d_bcc"] = scatter3d_bcc
-
+    # Generar visualizaciones
+    resultados["histogram"] = plot_efficiency_histogram(df_plot_ready)
+    resultados["scatter_3d"] = plot_3d_inputs_outputs(df, inputs, outputs, df_plot_ready, dmu_column)
+    
     return resultados
