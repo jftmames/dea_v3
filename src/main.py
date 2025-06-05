@@ -12,7 +12,7 @@ if script_dir not in sys.path:
 
 # --- 1) Importaciones ---
 from results import mostrar_resultados
-from inquiry_engine import suggest_actionable_variables # <-- CAMBIO DE NOMBRE
+from inquiry_engine import suggest_actionable_variables # <-- Se importa la nueva función
 from openai_helpers import generate_analysis_proposals
 from dea_models.visualizations import plot_hypothesis_distribution, plot_benchmark_spider
 
@@ -39,7 +39,7 @@ def run_dea_analysis(_df, dmu_col, input_cols, output_cols):
     return mostrar_resultados(_df.copy(), dmu_col, input_cols, output_cols)
 
 @st.cache_data
-def get_actionable_suggestions(_context): # <-- CAMBIO DE NOMBRE
+def get_actionable_suggestions(_context): # <-- Se usa la nueva función
     return suggest_actionable_variables(context=_context)
 
 @st.cache_data
@@ -126,17 +126,15 @@ if st.session_state.app_status != "initial":
             if st.session_state.get("actionable_suggestions"):
                 st.info("La IA sugiere que las siguientes variables son las más relevantes para entender la ineficiencia. Haz clic en una para analizarla visualmente.")
                 
-                placeholder = st.container() # Contenedor para el gráfico
+                placeholder = st.container()
                 
-                # Crear los botones de exploración
-                cols = st.columns(len(st.session_state.actionable_suggestions))
+                cols = st.columns(len(st.session_state.actionable_suggestions) or 1)
                 for i, suggestion in enumerate(st.session_state.actionable_suggestions):
                     with cols[i]:
                         if st.button(f"Analizar '{suggestion['variable']}'", key=suggestion['variable'], use_container_width=True):
                             st.session_state.plot_variable_name = suggestion['variable']
                             st.session_state.plot_variable_reasoning = suggestion['reasoning']
                 
-                # Si hay una variable seleccionada, mostrar el gráfico
                 if st.session_state.get("plot_variable_name"):
                     var_to_plot = st.session_state.plot_variable_name
                     reasoning = st.session_state.plot_variable_reasoning
