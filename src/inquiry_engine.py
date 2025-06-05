@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional, Tuple
 
 import pandas as pd
 from openai import OpenAI
-import plotly.graph_objects as go # <--- Asegúrate de que esta línea esté presente
+import plotly.graph_objects as go
 
 # Corregido: Importación directa del módulo data_validator
 from data_validator import _llm_suggest
@@ -32,22 +32,36 @@ FUNCTION_SPEC = {
     },
 }
 
-# ---- Utilidad Plotly para visualizar el árbol ----
-def to_plotly_tree(tree: Dict[str, Any]) -> go.Figure:
+# ---- Utilidad Plotly para visualizar el árbol (CON TÍTULO) ----
+def to_plotly_tree(tree: Dict[str, Any], title: str = "Visualización del Árbol") -> go.Figure:
     """
     Convierte un diccionario anidado (tree) en un objeto Treemap de Plotly.
+    Ahora acepta un parámetro 'title' para el gráfico.
     """
     labels, parents = [], []
+    root_node_name = list(tree.keys())[0] if tree else "Raíz"
 
-    def walk(node: Dict[str, Any], parent: str = ""):
+    def walk(node: Dict[str, Any], parent: str):
         for pregunta, hijos in node.items():
             labels.append(pregunta)
             parents.append(parent)
             if isinstance(hijos, dict):
                 walk(hijos, pregunta)
 
-    walk(tree)
-    return go.Figure(go.Treemap(labels=labels, parents=parents, branchvalues="total"))
+    # Iniciar el recorrido desde el nodo raíz
+    walk(tree, "")
+    
+    fig = go.Figure(go.Treemap(
+        labels=labels, 
+        parents=parents, 
+        root_color="lightgrey"
+    ))
+    fig.update_layout(
+        title_text=title,
+        title_x=0.5,
+        margin=dict(t=50, l=25, r=25, b=25)
+    )
+    return fig
 
 # ---- Generador de subpreguntas con fallback triple ----
 def generate_inquiry(
@@ -73,33 +87,38 @@ def generate_inquiry(
         "exceso de inputs, déficit de outputs, benchmarking, entorno regulatorio."
     )
 
-    resp = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[{"role": "user", "content": user_prompt}],
-        tools=[{"type": "function", "function": FUNCTION_SPEC}],
-        tool_choice="auto",
-        temperature=temperature,
-    )
-
-    # a) Intentar function-calling
-    if resp.choices[0].message.tool_calls:
-        args = resp.choices[0].message.tool_calls[0].function.arguments
-        try:
-            data = json.loads(args)
-            tree = data.get("tree", data)
-            if _tree_is_valid(tree):
-                return tree
-        except json.JSONDecodeError:
-            pass
-
-    # b) Intentar parsear texto como JSON
-    raw_content = resp.choices[0].message.content or ""
-    raw = raw_content.strip()
     try:
-        tree = json.loads(raw)
-        if _tree_is_valid(tree):
-            return tree
+        resp = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": user_prompt}],
+            tools=[{"type": "function", "function": FUNCTION_SPEC}],
+            tool_choice="auto",
+            temperature=temperature,
+        )
+
+        # a) Intentar function-calling
+        if resp.choices[0].message.tool_calls:
+            args = resp.choices[0].message.tool_calls[0].function.arguments
+            try:
+                data = json.loads(args)
+                tree = data.get("tree", data)
+                if _tree_is_valid(tree):
+                    return tree
+            except json.JSONDecodeError:
+                pass
+
+        # b) Intentar parsear texto como JSON
+        raw_content = resp.choices[0].message.content or ""
+        raw = raw_content.strip()
+        if raw:
+            try:
+                tree = json.loads(raw)
+                if _tree_is_valid(tree):
+                    return tree
+            except Exception:
+                pass
     except Exception:
+        # Si la API de OpenAI falla, ir directamente al fallback
         pass
 
     # c) Fallback enriquecido
@@ -108,22 +127,14 @@ def generate_inquiry(
 # ---- Validar estructura del árbol ----
 def _tree_is_valid(tree: Dict[str, Any]) -> bool:
     """
-    Verifica que el árbol no sea placeholder y tenga al menos 2 subnodos.
+    Verifica que el árbol no sea placeholder y tenga al menos un nivel de anidación.
     """
-    if not tree:
+    if not isinstance(tree, dict) or not tree:
         return False
-    first_key = next(iter(tree)) # Get the first (and usually only) root question
-    # Check if the placeholder icon is present in the value of the root key (which should be a dict of subquestions)
-    is_placeholder_icon_present = "ℹ️" in str(tree.get(first_key, {}))
     
-    # Check if the root has at least two direct children (subnodes)
-    has_two_or_more_subnodes = isinstance(tree.get(first_key), dict) and len(tree[first_key]) >= 2
-    
-    # Check if there's at least one subnode that itself is a dictionary (indicating more levels)
-    has_extra_level = isinstance(tree.get(first_key), dict) and any(isinstance(v, dict) for v in tree[first_key].values())
-    
-    # A tree is valid if it's not a placeholder AND it has at least two subnodes OR has deeper levels.
-    return not is_placeholder_icon_present and (has_two_or_more_subnodes or has_extra_level)
+    first_level_values = tree.values()
+    # Es válido si al menos uno de sus hijos es también un diccionario (tiene sub-ramas)
+    return any(isinstance(value, dict) for value in first_level_values)
 
 
 # ---- Árbol placeholder por defecto ----
@@ -131,12 +142,12 @@ def _fallback_tree(root_q: str) -> Dict[str, Any]:
     return {
         root_q: {
             "¿Exceso de inputs?": {
-                "¿Qué input consume más que los peers?": {"ℹ️: Revise el uso de recursos comparado con los eficientes."},
-                "¿Se puede reducir un 10 % sin afectar output?": {"ℹ️: Considere ajustes en la escala de operación."},
+                "¿Qué input consume más que los peers?": "Revisar uso de recursos vs. eficientes.",
+                "¿Se puede reducir un 10% sin afectar output?": "Considerar ajustes en escala.",
             },
             "¿Déficit de outputs?": {
-                "¿Output clave por debajo de la media eficiente?": {"ℹ️: Identifique productos o servicios con bajo rendimiento."},
-                "¿Implementar benchmarking con DMU eficiente?": {"ℹ️: Analice las mejores prácticas de DMUs eficientes."},
+                "¿Output clave por debajo de la media eficiente?": "Identificar productos con bajo rendimiento.",
+                "¿Implementar benchmarking con DMU eficiente?": "Analizar mejores prácticas de peers.",
             },
         }
     }
@@ -147,46 +158,22 @@ def suggest_input_range(
     input_name: str
 ) -> Optional[Tuple[float, float, str]]:
     """
-    Usa RAG (Reinforcement with Retrieval) para sugerir un rango [min–max]
-    típico para un insumo dado (input_name) en el DataFrame df.
-    Retorna (min_sug, max_sug, citation) o None si no hay sugerencia.
+    Usa RAG para sugerir un rango [min–max] típico para un insumo.
     """
-    # Convertir las primeras filas a JSON para contexto al LLM
     df_head_json = df.head().to_json(orient="records")
-
-    # Invocar al LLM a través de data_validator._llm_suggest
-    # NOTE: _llm_suggest expects input_cols and output_cols lists.
-    # We are asking for a suggestion on a single input, so pass it as [input_name]
     res = _llm_suggest(df_head_json, [input_name], [])
 
     if not res or "suggested_fixes" not in res:
         return None
 
-    fixes = res["suggested_fixes"]
-    if not fixes:
-        return None
+    suggestion_text = res["suggested_fixes"][0] if res["suggested_fixes"] else ""
 
-    suggestion_text = fixes[0]
-
-    # Try to extract a numerical range in [min, max] format
     match = re.search(r"\[\s*([0-9.]+)\s*,\s*([0-9.]+)\s*\]", suggestion_text)
     if match:
         try:
-            min_sug = float(match.group(1))
-            max_sug = float(match.group(2))
+            min_sug, max_sug = float(match.group(1)), float(match.group(2))
             return min_sug, max_sug, suggestion_text
         except ValueError:
             pass
-
-    # If no bracketed range found, try to extract two numbers anywhere
-    nums = re.findall(r"([0-9]+(?:\.[0-9]+)?)", suggestion_text)
-    if len(nums) >= 2:
-        try:
-            min_sug = float(nums[0])
-            max_sug = float(nums[1])
-            return min_sug, max_sug, suggestion_text
-        except ValueError:
-            pass
-
-    # If no range could be extracted, return None
+    
     return None
