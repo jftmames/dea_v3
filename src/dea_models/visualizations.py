@@ -18,6 +18,60 @@ def plot_efficiency_histogram(dea_df: pd.DataFrame, bins: int = 20):
     return fig
 
 
+def plot_benchmark_spider(df_merged: pd.DataFrame, selected_dmu: str, input_cols: list[str], output_cols: list[str]):
+    """
+    df_merged: DataFrame que resulta de hacer merge(df_ccr, df_original, on=dmu_col)
+               Debe contener al menos: dmu_col, columnas de inputs, columnas de outputs, y eficiencia (“tec_efficiency_ccr”).
+    selected_dmu: cadena con el ID de la DMU a graficar
+    input_cols: lista de nombres de columnas de inputs
+    output_cols: lista de nombres de columnas de outputs
+
+    Devuelve un radar chart de Plotly Graph Objects comparando la DMU seleccionada vs sus peers eficientes.
+    """
+    # 1) Verificar que la DMU exista
+    dmu_col = df_merged.columns[0]
+    if selected_dmu not in df_merged[dmu_col].astype(str).tolist():
+        df_empty = pd.DataFrame({"variable": [], "valor": [], "grupo": []})
+        return px.line_polar(df_empty, r="valor", theta="variable", line_close=True, title="Sin datos")
+
+    # 2) Filtrar peers eficientes (tec_efficiency_ccr == 1.0)
+    if "tec_efficiency_ccr" not in df_merged.columns:
+        df_empty = pd.DataFrame({"variable": [], "valor": [], "grupo": []})
+        return px.line_polar(df_empty, r="valor", theta="variable", line_close=True, title="Sin datos")
+
+    peers = df_merged[df_merged["tec_efficiency_ccr"] == 1.0]
+    if peers.empty:
+        df_empty = pd.DataFrame({"variable": [], "valor": [], "grupo": []})
+        return px.line_polar(df_empty, r="valor", theta="variable", line_close=True, title="Sin peers eficientes")
+
+    # 3) Valores de la DMU seleccionada
+    dmu_row = df_merged[df_merged[dmu_col].astype(str) == selected_dmu].iloc[0]
+
+    # 4) Promedio de peers eficientes para cada columna de inputs y outputs
+    peers_avg = peers[input_cols + output_cols].mean()
+
+    # 5) Preparar DataFrame para radar chart
+    variables = input_cols + output_cols
+    valores_dmu = [float(dmu_row[col]) for col in variables]
+    valores_peers = [float(peers_avg[col]) for col in variables]
+
+    df_radar = pd.DataFrame({
+        "variable": variables * 2,
+        "valor": valores_dmu + valores_peers,
+        "grupo": [f"DMU {selected_dmu}"] * len(variables) + ["Peers promedio"] * len(variables)
+    })
+
+    fig = px.line_polar(
+        df_radar,
+        r="valor",
+        theta="variable",
+        color="grupo",
+        line_close=True,
+        title=f"Benchmark Spider: {selected_dmu} vs Peers eficientes"
+    )
+    fig.update_traces(fill="toself")
+    return fig
+
 def plot_3d_inputs_outputs(
     orig_df: pd.DataFrame,
     inputs: list[str],
