@@ -1,73 +1,84 @@
-# src/dea_models/cross_efficiency.py
-
+# jftmames/-dea-deliberativo-mvp/-dea-deliberativo-mvp-b44b8238c978ae0314af30717b9399634d28f8f9/src/dea_models/cross_efficiency.py
 import numpy as np
 import pandas as pd
+import cvxpy as cp
 
-# Corregido: Importaciones relativas dentro del paquete dea_models
-from .radial import _run_dea_internal  # reutilizamos el núcleo CCR/BCC
 from .utils import validate_positive_dataframe
+
+def _solve_ccr_dual(X: np.ndarray, Y: np.ndarray, dmu_index: int):
+    """
+    Resuelve el problema dual del CCR para una DMU para obtener los pesos u, v.
+    """
+    m, n = X.shape
+    s = Y.shape[0]
+    x_k = X[:, [dmu_index]]
+    y_k = Y[:, [dmu_index]]
+
+    u = cp.Variable((s, 1), nonneg=True)  # Pesos de outputs
+    v = cp.Variable((m, 1), nonneg=True)  # Pesos de inputs
+
+    # Restricciones del dual
+    # La eficiencia de ninguna DMU puede ser > 1 con estos pesos
+    cons = [
+        u.T @ Y - v.T @ X <= 0,
+        v.T @ x_k == 1 # Normalización
+    ]
+    
+    # Objetivo: maximizar la eficiencia de la DMU k
+    obj = cp.Maximize(u.T @ y_k)
+    
+    prob = cp.Problem(obj, cons)
+    prob.solve(solver=cp.ECOS, abstol=1e-8)
+    
+    if prob.status in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE] and u.value is not None and v.value is not None:
+        return u.value, v.value
+    return None, None
 
 def compute_cross_efficiency(
     df: pd.DataFrame,
     dmu_column: str,
     input_cols: list[str],
     output_cols: list[str],
-    rts: str = "CRS",
-    method: str = "average"
+    rts: str = "CRS", # Cross-efficiency se define clásicamente para CCR (CRS)
 ) -> pd.DataFrame:
     """
-    Calcula la matriz de cross-efficiencies:
-      1. Resolver CCR o BCC para cada DMU => obtener pesos óptimos (u_j, v_j) implícitos.
-      2. Para cada par (i, j), calcular eficiencia de i usando pesos de j.
-    method:
-      - "average": eficiencia_i = promedio sobre j
-      - "aggressive": eficiencia_i = min_j θ_{i|j}
-      - "benevolent": eficiencia_i = max_j θ_{i|j}
-    Retorna DataFrame n×n con columnas y filas = DMUs, y una fila adicional con ranking.
-    Retorna DataFrame n×n con columnas y filas = DMUs, y una columna adicional con ranking.
+    Calcula la matriz de eficiencias cruzadas.
     """
-    # Validar que la columna DMU exista
     if dmu_column not in df.columns:
         raise ValueError(f"La columna DMU '{dmu_column}' no existe en el DataFrame.")
-
-    # 1) Validar positividades
-    cols = input_cols + output_cols
-    validate_positive_dataframe(df, cols)
+    validate_positive_dataframe(df, input_cols + output_cols)
 
     dmus = df[dmu_column].astype(str).tolist()
     n = len(dmus)
+    X = df[input_cols].to_numpy().T
+    Y = df[output_cols].to_numpy().T
+    
+    # 1. Obtener los pesos óptimos (u_j, v_j) para cada DMU j
+    all_weights = {}
+    for j in range(n):
+        u_j, v_j = _solve_ccr_dual(X, Y, j)
+        if u_j is not None and v_j is not None:
+            all_weights[j] = (u_j, v_j)
 
-    # 2) Resolver modelos individuales para obtener lambdas
-    lambdas_list = []  # lista de dicts: un dict por j con pesos óptimos
-    df_ccr_full = _run_dea_internal(
-        df=df,
-        inputs=input_cols,
-        outputs=output_cols,
-        model="CCR",
-        orientation="input",
-        super_eff=False
-    )
-    # df_ccr_full contiene una fila por DMU, con 'lambda_vector' dict
-    # Para la cross-efficiency, necesitamos los pesos duales u y v de cada DMU,
-    # no solo los lambdas. El _run_dea_internal no los devuelve directamente.
-    # Necesitamos una función que devuelva los u, v o que calcule las eficiencias cruzadas.
-    # Dado que _run_dea_internal no retorna los pesos duales, se asume que
-    # se re-calcularán las eficiencias individualmente usando los pesos del "evaluador".
-    # Esto implica simular el proceso de optimización para cada par (i, j).
-    # Sin embargo, el código original no implementa explícitamente el cálculo de los pesos (u, v),
-    # solo los lambda_vector. Si se desea una implementación completa de cross-efficiency,
-    # se debería extender _dea_core o _run_dea_internal para devolver los pesos duales,
-    # o adaptar la lógica para calcular la eficiencia de cada DMU 'i' utilizando
-    # la frontera (y, por lo tanto, los pesos implícitos) de cada DMU 'j'.
+    # 2. Calcular la matriz de eficiencia cruzada E_ij
+    cross_eff_matrix = np.full((n, n), np.nan)
+    for j, (u_j, v_j) in all_weights.items(): # DMU 'j' es la que evalúa
+        for i in range(n): # DMU 'i' es la evaluada
+            x_i = X[:, [i]]
+            y_i = Y[:, [i]]
+            
+            numerator = u_j.T @ y_i
+            denominator = v_j.T @ x_i
+            
+            # Evitar división por cero
+            if denominator > 1e-9:
+                cross_eff_matrix[i, j] = (numerator / denominator).item()
 
-    # Por ahora, se mantiene la estructura del archivo original que no completa
-    # la lógica de cálculo de la matriz de cross-efficiencies más allá de la obtención de lambdas.
-    # Para completar, necesitaríamos resolver el problema DEA para cada DMU 'j'
-    # para obtener sus pesos óptimos (u_j, v_j), y luego usar esos (u_j, v_j)
-    # para evaluar a todas las DMUs 'i'.
-
-    # Se retorna un DataFrame vacío como placeholder, ya que la lógica está incompleta.
-    # En un entorno real, esto requeriría una modificación en el núcleo DEA para
-    # exponer los pesos duales o una formulación alternativa para cross-efficiency.
-
-    return pd.DataFrame(index=dmus, columns=dmus) # Placeholder.
+    # 3. Crear el DataFrame final
+    df_cross = pd.DataFrame(cross_eff_matrix, index=dmus, columns=dmus)
+    
+    # 4. Calcular el score promedio para cada DMU
+    df_cross['Average Score'] = df_cross.mean(axis=1)
+    df_cross = df_cross.sort_values('Average Score', ascending=False)
+    
+    return df_cross
