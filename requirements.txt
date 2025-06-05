@@ -10,3 +10,4 @@ python-pptx
 pytest
 libsql-client
 SQLAlchemy
+sqlalchemy-libsql
