@@ -345,7 +345,11 @@ def run_bcc(
         x_i, y_i = X[:, [i]], Y[:, [i]]    
 
         # 5.3) Construir problema según orientación
-        constraints: list = [cp.sum(lambdas_var) == 1]
+        # --- INICIO DE LA CORRECCIÓN #2 ---
+        convexity_constraint = cp.sum(lambdas_var) == 1
+        constraints: list = [convexity_constraint]
+        # --- FIN DE LA CORRECCIÓN #2 ---
+        
         if orientation == "input":
             theta = cp.Variable()
             constraints += [
@@ -397,9 +401,10 @@ def run_bcc(
         # 9) Determinación de RTS
         rts_label = "VRS"
         if prob.status in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE]:
-            dual_sum_lambda = prob.constraints[-1].dual_value
+            # --- INICIO DE LA CORRECCIÓN #2 ---
+            dual_sum_lambda = convexity_constraint.dual_value
+            # --- FIN DE LA CORRECCIÓN #2 ---
             if dual_sum_lambda is not None:
-                # --- INICIO DE LA CORRECCIÓN ---
                 dual_val = float(dual_sum_lambda)
                 if abs(dual_val) < 1e-6:
                     rts_label = "CRS"
@@ -407,7 +412,6 @@ def run_bcc(
                     rts_label = "IRS" if orientation == "input" else "DRS"
                 else:
                     rts_label = "DRS" if orientation == "input" else "IRS"
-                # --- FIN DE LA CORRECCIÓN ---
         
         # 10) Guardar registro
         registros[i] = {
