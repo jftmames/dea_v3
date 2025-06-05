@@ -7,6 +7,7 @@ from typing import Any, Dict, Optional, Tuple
 
 import pandas as pd
 from openai import OpenAI
+import plotly.graph_objects as go # <--- Asegúrate de que esta línea esté presente
 
 # Corregido: Importación directa del módulo data_validator
 from data_validator import _llm_suggest
