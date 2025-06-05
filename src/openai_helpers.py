@@ -24,6 +24,25 @@ def chat_completion(prompt: str, tools: list | None = None, use_json_mode: bool 
     return client.chat.completions.create(**params)
 
 
+def generate_analysis_proposals(df_columns: list[str], df_head: pd.DataFrame) -> dict:
+    """
+    Analiza las columnas de un DataFrame y propone varios modelos de análisis DEA.
+    """
+    prompt = (
+        "Eres un consultor experto en Data Envelopment Analysis (DEA). Has recibido un conjunto de datos con las siguientes columnas: "
+        f"{df_columns}. A continuación se muestran las primeras filas:\n\n{df_head.to_string()}\n\n"
+        "Tu tarea es proponer entre 2 y 4 modelos de análisis DEA distintos y bien fundamentados que se podrían aplicar a estos datos. "
+        "Para cada propuesta, proporciona un título, un breve razonamiento sobre su utilidad y las listas de inputs y outputs sugeridas.\n\n"
+        "Devuelve únicamente un objeto JSON válido con una sola clave raíz 'proposals'. El valor de 'proposals' debe ser una lista de objetos, donde cada objeto representa una propuesta y contiene las claves 'title', 'reasoning', 'inputs' y 'outputs'."
+    )
+    try:
+        resp = chat_completion(prompt, use_json_mode=True, temperature=0.5)
+        content = resp.choices[0].message.content
+        return json.loads(content)
+    except Exception as e:
+        return {"error": str(e), "text": "No se pudieron generar las propuestas de análisis."}
+
+
 def explain_orientation(inputs: list[str], outputs: list[str], orientation: str) -> dict:
     """
     Sugiere si la orientación ('input' o 'output') es adecuada.
@@ -38,23 +57,3 @@ def explain_orientation(inputs: list[str], outputs: list[str], orientation: str)
         return {"text": text}
     except Exception as e:
         return {"error": str(e)}
-
-
-def recommend_alternatives(df_columns: list[str], inputs: list[str], outputs: list[str]) -> dict:
-    """
-    Recomienda columnas alternativas para inputs/outputs usando el modo JSON.
-    """
-    prompt = (
-        f"Columnas disponibles: {df_columns}\n"
-        f"Has seleccionado inputs = {inputs} y outputs = {outputs} para un modelo DEA.\n"
-        "Sugiere alternativas de columnas que puedan mejorar el modelo "
-        "en caso de que haya colinealidad o variables redundantes. "
-        "Devuelve únicamente un objeto JSON con dos claves: 'recommended_inputs' y 'recommended_outputs', "
-        "cada una con una lista de nombres de columnas sugeridas."
-    )
-    try:
-        resp = chat_completion(prompt, use_json_mode=True, temperature=0.3)
-        content = resp.choices[0].message.content
-        return json.loads(content)
-    except Exception as e:
-        return {"error": str(e), "text": "No se pudieron generar recomendaciones."}
