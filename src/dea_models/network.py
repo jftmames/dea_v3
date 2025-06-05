@@ -1,5 +1,4 @@
 # src/dea_models/network.py
-
 import numpy as np
 import pandas as pd
 import cvxpy as cp
@@ -76,6 +75,10 @@ def run_network_dea(
             cons.append(cp.sum(lambda2) == 1)
 
         # Interconexión: linkage_matrix @ (Y1 λ1) == X2 λ2
+        # La dimensión de linkage_matrix debe ser (m2 x s1)
+        # (Y1 @ lambda1) es (s1 x 1)
+        # (X2 @ lambda2) es (m2 x 1)
+        # Así que (linkage_matrix @ (Y1 @ lambda1)) es (m2 x 1)
         cons.append(linkage_matrix @ (Y1 @ lambda1) == X2 @ lambda2)
 
         # Objetivo: minimizar (θ1 + θ2)
@@ -92,8 +95,8 @@ def run_network_dea(
             else float((theta1_val + theta2_val) / 2)
         )
 
-        lambda1_vals = {dmus[j]: float(lambda1.value[j]) for j in range(n)}
-        lambda2_vals = {dmus[j]: float(lambda2.value[j]) for j in range(n)}
+        lambda1_vals = {dmus[j]: float(lambda1.value[j]) for j in range(n)} if lambda1.value is not None else {}
+        lambda2_vals = {dmus[j]: float(lambda2.value[j]) for j in range(n)} if lambda2.value is not None else {}
 
         resultados.append({
             dmu_column: dmus[i],
@@ -126,8 +129,11 @@ def run_multi_stage_network(
 
     # Validar que len(stages) = len(rts_list) y len(linkages)=len(stages)-1
     num_etapas = len(stages)
-    if len(rts_list) != num_etapas or len(linkages) != num_etapas - 1:
-        raise ValueError("Dimensiones de stages/rts_list/linkages no coinciden.")
+    if len(rts_list) != num_etapas:
+        raise ValueError(f"El número de RTS ({len(rts_list)}) debe coincidir con el número de etapas ({num_etapas}).")
+    if len(linkages) != num_etapas - 1:
+        raise ValueError(f"El número de matrices de enlace ({len(linkages)}) debe ser uno menos que el número de etapas ({num_etapas-1}).")
+
 
     # Validar positividades en todas las columnas de todas las etapas
     cols_todas = []
@@ -143,10 +149,10 @@ def run_multi_stage_network(
         X_list.append(df[inp].to_numpy().T)
         Y_list.append(df[out].to_numpy().T)
     dmus = df[dmu_column].astype(str).tolist()
-    n = X_list[0].shape[1]
+    n = X_list[0].shape[1] # Number of DMUs
 
     resultados = []
-    for i in range(n):
+    for i in range(n): # Iterate over each DMU
         # Variables y lazos para cada etapa
         lambdas_vars = []
         thetas = []
@@ -154,7 +160,7 @@ def run_multi_stage_network(
         for k in range(num_etapas):
             Xk = X_list[k]
             Yk = Y_list[k]
-            mk, nk = Xk.shape[0], Xk.shape[1]
+            mk, nk = Xk.shape[0], Xk.shape[1] # mk = num inputs in stage k, nk = num DMUs
 
             lamb_k = cp.Variable((nk, 1), nonneg=True)
             theta_k = cp.Variable()
@@ -177,6 +183,10 @@ def run_multi_stage_network(
             Xk1 = X_list[k + 1]
             lamb_k1 = lambdas_vars[k + 1]
             Zk = linkages[k]  # debe ser shape: (#inputs_{k+1} × #outputs_k)
+            # Ensure linkage matrix dimensions are correct
+            if Zk.shape[0] != Xk1.shape[0] or Zk.shape[1] != Yk.shape[0]:
+                 raise ValueError(f"Dimensión incorrecta para linkage_matrix[{k}]. Esperado ({Xk1.shape[0]}x{Yk.shape[0]}), Got {Zk.shape}")
+
             cons.append(Zk @ (Yk @ lamb_k) == Xk1 @ lamb_k1)
 
         # Objetivo: minimizar suma de thetas
@@ -197,7 +207,7 @@ def run_multi_stage_network(
         lambda_vals_dicts = []
         for k in range(num_etapas):
             lamk = lambdas_vars[k]
-            lambda_vals_dicts.append({dmus[j]: float(lamk.value[j]) for j in range(n)})
+            lambda_vals_dicts.append({dmus[j]: float(lamk.value[j]) for j in range(n)}) if lamk.value is not None else {}
 
         fila = {dmu_column: dmus[i]}
         for k in range(num_etapas):
