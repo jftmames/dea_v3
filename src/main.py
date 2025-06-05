@@ -118,7 +118,7 @@ st.title("Simulador Econométrico-Deliberativo – DEA")
 
 uploaded_file = st.file_uploader("Cargar nuevo archivo CSV", type=["csv"])
 if uploaded_file is not None:
-    # Reiniciar estado al cargar un nuevo archivo, manteniendo la consistencia
+    # Reiniciar estado al cargar un nuevo archivo para asegurar consistencia
     st.session_state.app_status = "initial"
     st.session_state.df = pd.read_csv(uploaded_file)
     st.session_state.dmu_col = None
@@ -140,8 +140,9 @@ if st.session_state.df is not None:
     col1, col2 = st.columns(2)
     with col1:
         all_columns = df.columns.tolist()
-        # La clave es usar .get() para evitar el error si la clave no existe aún
-        dmu_index = all_columns.index(st.session_state.dmu_col) if st.session_state.dmu_col in all_columns else 0
+        # ACCESO DEFENSIVO para evitar AttributeError
+        current_dmu = getattr(st.session_state, 'dmu_col', None)
+        dmu_index = all_columns.index(current_dmu) if current_dmu and current_dmu in all_columns else 0
         st.selectbox("Columna de DMU", all_columns, index=dmu_index, key='dmu_col')
     with col2:
         st.multiselect("Columnas de Inputs", [c for c in all_columns if c != st.session_state.dmu_col], key='input_cols', default=st.session_state.input_cols)
@@ -161,14 +162,12 @@ if st.session_state.df is not None:
                 if st.session_state.inquiry_tree:
                     def flatten_tree(node, parent_path=""):
                         for key, value in node.items():
-                            full_path = f"{parent_path} -> {key}" if parent_path else key
                             tree_data_list.append({"Nodo": key, "Padre": parent_path or "Raíz"})
                             if isinstance(value, dict):
                                 flatten_tree(value, key)
                     
                     root_key = list(st.session_state.inquiry_tree.keys())[0]
-                    tree_data_list.append({"Nodo": root_key, "Padre": "Raíz"})
-                    flatten_tree(st.session_state.inquiry_tree[root_key], root_key)
+                    flatten_tree(st.session_state.inquiry_tree, "")
 
                 st.session_state.df_tree = pd.DataFrame(tree_data_list)
                 st.session_state.df_eee = pd.DataFrame([{"Métrica": "EEE Score", "Valor": st.session_state.eee_score}])
