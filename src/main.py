@@ -116,7 +116,6 @@ if st.session_state.app_status != "initial":
 
         results = st.session_state.dea_results
         
-        # ETAPA 4: Razonamiento y Exploración Interactiva
         if st.session_state.app_status in ["results_ready", "inquiry_done"]:
             st.header("Paso 4: Razona y Explora las Causas con IA", divider="blue")
             
@@ -156,17 +155,39 @@ if st.session_state.app_status != "initial":
                 find_leaves(st.session_state.inquiry_tree)
                 
                 st.info("Haz clic en una hipótesis para analizar los datos correspondientes.")
+                
+                # --- LÓGICA DE BOTONES MEJORADA ---
+                actionable_nodes_count = 0
                 cols = st.columns(3)
                 col_idx = 0
+
+                all_model_vars = proposal['inputs'] + proposal['outputs']
+
                 for node in leaf_nodes:
+                    # Intenta encontrar una variable de forma más flexible
+                    found_var = None
+                    # Primero, con el formato estricto
                     match = re.search(r"Analizar (input|output): \[(.*?)\]", node)
                     if match:
-                        var_name = match.group(2).strip()
+                        found_var = match.group(2).strip()
+                    else:
+                        # Si falla, busca cualquier nombre de variable en el texto
+                        for var in all_model_vars:
+                            if f"'{var}'" in node or f'"{var}"' in node or f" {var} " in node:
+                                found_var = var
+                                break
+                    
+                    if found_var:
+                        actionable_nodes_count += 1
                         with cols[col_idx % 3]:
                             if st.button(f"Explorar: {node}", key=node, use_container_width=True):
-                                st.session_state.plot_variable_name = var_name
+                                st.session_state.plot_variable_name = found_var
                                 st.rerun()
                         col_idx += 1
+                
+                if actionable_nodes_count == 0 and leaf_nodes:
+                    st.warning("La IA generó hipótesis, pero no se encontraron variables accionables para analizar visualmente en ellas. Intenta generar las hipótesis de nuevo.")
+
 
                 if st.session_state.get("plot_variable_name"):
                     var_to_plot = st.session_state.plot_variable_name
@@ -174,10 +195,8 @@ if st.session_state.app_status != "initial":
                         st.markdown(f"#### Análisis de la hipótesis: '{var_to_plot}'")
                         with st.spinner(f"Generando gráfico para '{var_to_plot}'..."):
                             fig = plot_hypothesis_distribution(
-                                df_results=results['df_ccr'],
-                                df_original=df,
-                                variable=var_to_plot,
-                                dmu_col=df.columns[0]
+                                df_results=results['df_ccr'], df_original=df,
+                                variable=var_to_plot, dmu_col=df.columns[0]
                             )
                             st.plotly_chart(fig, use_container_width=True)
                             if st.button("Cerrar exploración"):
@@ -185,28 +204,29 @@ if st.session_state.app_status != "initial":
                                 st.rerun()
 
         # ETAPA 5: Resultados Detallados
-        st.header("Paso 5: Resultados Numéricos y Gráficos Detallados", divider="blue")
-        tab_ccr, tab_bcc = st.tabs(["**Resultados CCR**", "**Resultados BCC**"])
-        
-        with tab_ccr:
-            st.subheader("Tabla de Eficiencias y Slacks (Modelo CCR)")
-            st.dataframe(results.get("df_ccr"))
-            st.subheader("Visualizaciones de Eficiencia (CCR)")
-            if "hist_ccr" in results and "scatter3d_ccr" in results:
-                col1, col2 = st.columns(2)
-                with col1: st.plotly_chart(results["hist_ccr"], use_container_width=True)
-                with col2: st.plotly_chart(results["scatter3d_ccr"], use_container_width=True)
-            st.subheader("Análisis de Benchmarking (CCR)")
-            dmu_options_ccr = results.get("df_ccr", pd.DataFrame()).get(df.columns[0], []).astype(str).tolist()
-            if dmu_options_ccr:
-                selected_dmu_ccr = st.selectbox("Seleccionar DMU para comparar con sus benchmarks:", options=dmu_options_ccr, key="dmu_ccr_spider")
-                if selected_dmu_ccr and "merged_ccr" in results:
-                    spider_fig_ccr = plot_benchmark_spider(results["merged_ccr"], selected_dmu_ccr, proposal['inputs'], proposal['outputs'])
-                    st.plotly_chart(spider_fig_ccr, use_container_width=True)
+        if st.session_state.app_status in ["results_ready", "inquiry_done"]:
+            st.header("Paso 5: Resultados Numéricos y Gráficos Detallados", divider="blue")
+            tab_ccr, tab_bcc = st.tabs(["**Resultados CCR**", "**Resultados BCC**"])
+            
+            with tab_ccr:
+                st.subheader("Tabla de Eficiencias y Slacks (Modelo CCR)")
+                st.dataframe(results.get("df_ccr"))
+                st.subheader("Visualizaciones de Eficiencia (CCR)")
+                if "hist_ccr" in results and "scatter3d_ccr" in results:
+                    col1, col2 = st.columns(2)
+                    with col1: st.plotly_chart(results["hist_ccr"], use_container_width=True)
+                    with col2: st.plotly_chart(results["scatter3d_ccr"], use_container_width=True)
+                st.subheader("Análisis de Benchmarking (CCR)")
+                dmu_options_ccr = results.get("df_ccr", pd.DataFrame()).get(df.columns[0], []).astype(str).tolist()
+                if dmu_options_ccr:
+                    selected_dmu_ccr = st.selectbox("Seleccionar DMU para comparar con sus benchmarks:", options=dmu_options_ccr, key="dmu_ccr_spider")
+                    if selected_dmu_ccr and "merged_ccr" in results:
+                        spider_fig_ccr = plot_benchmark_spider(results["merged_ccr"], selected_dmu_ccr, proposal['inputs'], proposal['outputs'])
+                        st.plotly_chart(spider_fig_ccr, use_container_width=True)
 
-        with tab_bcc:
-            st.subheader("Tabla de Eficiencias y Slacks (Modelo BCC)")
-            st.dataframe(results.get("df_bcc"))
-            st.subheader("Visualización de Eficiencia (BCC)")
-            if "hist_bcc" in results:
-                st.plotly_chart(results["hist_bcc"], use_container_width=True)
+            with tab_bcc:
+                st.subheader("Tabla de Eficiencias y Slacks (Modelo BCC)")
+                st.dataframe(results.get("df_bcc"))
+                st.subheader("Visualización de Eficiencia (BCC)")
+                if "hist_bcc" in results:
+                    st.plotly_chart(results["hist_bcc"], use_container_width=True)
