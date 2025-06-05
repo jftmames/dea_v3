@@ -58,6 +58,9 @@ def run_dea_analysis(_df, dmu_col, input_cols, output_cols):
 @st.cache_data
 def get_inquiry_and_eee(_root_q, _context, _df_hash):
     """Encapsula las llamadas al LLM y EEE para ser cacheados."""
+    # Comprueba si la API key de OpenAI está disponible
+    if not os.getenv("OPENAI_API_KEY"):
+        return None, 0.0 # Retorna None si la key no existe
     inquiry_tree = generate_inquiry(_root_q, context=_context)
     eee_score = compute_eee(inquiry_tree, depth_limit=5, breadth_limit=5)
     return inquiry_tree, eee_score
@@ -98,6 +101,19 @@ with st.sidebar:
             session_to_load = next((s for s in sessions if s['session_id'] == session_id_to_load), None)
             if session_to_load:
                 load_full_session(session_to_load)
+    
+    st.divider()
+    st.header("Configuración Avanzada")
+    st.info("""
+        Para activar el **Análisis Deliberativo** (Árbol de Indagación y Métrica EEE),
+        necesitas añadir tu API Key de OpenAI.
+        
+        1. Ve a la configuración de tu app en Streamlit Cloud.
+        2. En la sección 'Secrets', añade un nuevo secret con el nombre `OPENAI_API_KEY`.
+        3. Pega tu clave de OpenAI como valor.
+        4. Guarda y reinicia la aplicación.
+    """)
+
 
 # -------------------------------------------------------
 # 5) Área principal
@@ -106,30 +122,24 @@ st.title("Simulador Econométrico-Deliberativo – DEA")
 
 uploaded_file = st.file_uploader("Cargar nuevo archivo CSV", type=["csv"])
 if uploaded_file is not None:
-    # Esta sección se ejecuta solo una vez cuando se sube el fichero
     if st.session_state.df is None:
         initialize_state()
         try:
-            # Intenta leer el CSV con separador de coma (estándar)
             df_temp = pd.read_csv(uploaded_file, sep=',')
             st.session_state.df = df_temp
         except Exception:
             try:
-                # Si falla, rebobina el fichero e intenta con punto y coma
                 uploaded_file.seek(0)
                 df_temp = pd.read_csv(uploaded_file, sep=';')
                 st.session_state.df = df_temp
             except Exception as e:
-                # Si ambos fallan, muestra un error claro y no hace nada más
-                st.error(f"Error al leer el fichero CSV. Asegúrate de que el formato es correcto (separado por comas o punto y coma). Detalle: {e}")
-                st.session_state.df = None # Asegura que el estado siga siendo nulo
-
-        # Si el DataFrame se ha cargado con éxito, reinicia la app para mostrar la UI
+                st.error(f"Error al leer el fichero CSV. Asegúrate de que el formato es correcto. Detalle: {e}")
+                st.session_state.df = None
+        
         if st.session_state.df is not None:
             st.rerun()
 
 # --- Flujo principal de la UI ---
-# MÉTODO SEGURO para comprobar el DataFrame
 if 'df' in st.session_state and st.session_state.df is not None:
     df = st.session_state.df
     st.subheader("Configuración del Análisis")
@@ -174,37 +184,51 @@ if 'df' in st.session_state and st.session_state.df is not None:
 
 # --- Mostrar resultados ---
 if st.session_state.get('app_status') == "results_ready" and st.session_state.get('dea_results'):
-    st.header("Resultados del Análisis", divider='rainbow')
+    results = st.session_state.dea_results
+    
+    st.header("Resultados del Análisis DEA", divider='rainbow')
 
     st.subheader("📊 Tabla de Eficiencias (CCR)")
-    st.dataframe(st.session_state.dea_results["df_ccr"])
+    st.dataframe(results["df_ccr"])
+
+    # --- SECCIÓN DE GRÁFICOS DEA ---
+    st.subheader("Visualizaciones de Eficiencia")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.plotly_chart(results['hist_ccr'], use_container_width=True)
+    with col2:
+        # Asumiendo que scatter3d_ccr está en los resultados
+        if 'scatter3d_ccr' in results:
+            st.plotly_chart(results['scatter3d_ccr'], use_container_width=True)
 
     st.subheader("🕷️ Benchmark Spider CCR")
-    dmu_options = st.session_state.dea_results["df_ccr"][st.session_state.dmu_col].astype(str).tolist()
+    dmu_options = results["df_ccr"][st.session_state.dmu_col].astype(str).tolist()
     
     selected_dmu_index = dmu_options.index(st.session_state.selected_dmu) if st.session_state.get('selected_dmu') in dmu_options else 0
     st.selectbox("Seleccionar DMU para comparar:", options=dmu_options, index=selected_dmu_index, key="selected_dmu")
     
     if st.session_state.selected_dmu:
-        spider_fig = plot_benchmark_spider(st.session_state.dea_results["merged_ccr"], st.session_state.selected_dmu, st.session_state.input_cols, st.session_state.output_cols)
+        spider_fig = plot_benchmark_spider(results["merged_ccr"], st.session_state.selected_dmu, st.session_state.input_cols, st.session_state.output_cols)
         st.plotly_chart(spider_fig, use_container_width=True)
 
-    st.subheader("🌳 Complejo de Indagación (Árbol de Diagnóstico)")
+    # --- SECCIÓN DE ANÁLISIS DELIBERATIVO ---
     if st.session_state.get('inquiry_tree'):
+        st.header("Análisis Deliberativo Asistido por IA", divider='rainbow')
+        st.subheader("🌳 Complejo de Indagación (Árbol de Diagnóstico)")
         tree_map_fig = to_plotly_tree(st.session_state.inquiry_tree, title="Árbol de Diagnóstico: Causas y Estrategias")
         st.plotly_chart(tree_map_fig, use_container_width=True)
 
-    st.subheader("🧠 Métrica de Calidad del Diagnóstico (EEE)")
-    st.info("El **Índice de Equilibrio Erotético (EEE)** mide la calidad y robustez del árbol de diagnóstico (0 a 1).")
-    if st.session_state.get('eee_score') is not None:
+        st.subheader("🧠 Métrica de Calidad del Diagnóstico (EEE)")
+        st.info("El **Índice de Equilibrio Erotético (EEE)** mide la calidad y robustez del árbol de diagnóstico (0 a 1).")
         st.metric(label="Puntuación EEE", value=f"{st.session_state.eee_score:.4f}")
 
+    # --- SECCIÓN DE ACCIONES ---
     st.header("Acciones", divider='rainbow')
     notes = st.text_area("Notas de la sesión (se guardarán con la sesión)")
     
     if st.button("💾 Guardar Sesión Actual", use_container_width=True):
         with st.spinner("Guardando..."):
-            serializable_dea_results = {k: v.to_dict('records') for k, v in st.session_state.dea_results.items() if isinstance(v, pd.DataFrame)}
+            serializable_dea_results = {k: v.to_dict('records') for k, v in results.items() if isinstance(v, pd.DataFrame)}
             save_session(
                 user_id=default_user_id,
                 inquiry_tree=st.session_state.inquiry_tree, eee_score=st.session_state.eee_score, notes=notes,
@@ -218,8 +242,8 @@ if st.session_state.get('app_status') == "results_ready" and st.session_state.ge
     st.subheader("Generar Reportes")
     col1, col2 = st.columns(2)
     with col1:
-        html_report = generate_html_report(st.session_state.dea_results["df_ccr"], st.session_state.df_tree, st.session_state.df_eee)
+        html_report = generate_html_report(results["df_ccr"], st.session_state.df_tree, st.session_state.df_eee)
         st.download_button("Descargar HTML", html_report, f"reporte_dea.html", "text/html", use_container_width=True)
     with col2:
-        excel_report = generate_excel_report(st.session_state.dea_results["df_ccr"], st.session_state.df_tree, st.session_state.df_eee)
+        excel_report = generate_excel_report(results["df_ccr"], st.session_state.df_tree, st.session_state.df_eee)
         st.download_button("Descargar Excel", excel_report, f"reporte_dea.xlsx", use_container_width=True)
