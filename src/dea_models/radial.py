@@ -6,8 +6,7 @@ import pandas as pd
 from .utils import validate_positive_dataframe, validate_dataframe
 
 # ------------------------------------------------------------------
-# 1. Núcleo DEA (CCR / BCC) — input/output orientation
-# (Esta función es un buen concepto pero no es utilizada por las funciones públicas)
+# 1. Núcleo DEA (utilizado por la función interna de más abajo)
 # ------------------------------------------------------------------
 def _dea_core(
     X: np.ndarray,
@@ -71,7 +70,48 @@ def _dea_core(
     return eff
 
 # ------------------------------------------------------------------
-# 2. Función pública: run_ccr
+# 2. Función interna que es utilizada por auto_tuner.py
+# ------------------------------------------------------------------
+def _run_dea_internal(
+    df: pd.DataFrame,
+    inputs: list[str],
+    outputs: list[str],
+    model: str = "CCR",
+    orientation: str = "input",
+    super_eff: bool = False,
+    dmu_col_name: str = "DMU"
+) -> pd.DataFrame:
+    """
+    Ejecuta una versión simplificada de DEA para devolver solo la eficiencia.
+    """
+    assert orientation in ("input", "output"), "orientation debe ser 'input' u 'output'"
+    assert model.upper() in ("CCR", "BCC"), "model debe ser 'CCR' o 'BCC'"
+
+    df_num = df.copy()
+    validate_positive_dataframe(df_num, inputs + outputs)
+
+    X_data = df_num[inputs].to_numpy().T
+    Y_data = df_num[outputs].to_numpy().T
+    rts_model = "CRS" if model.upper() == "CCR" else "VRS"
+    eff_scores = _dea_core(X_data, Y_data, rts=rts_model, orientation=orientation, super_eff=super_eff)
+
+    if dmu_col_name in df.columns:
+        dmu_ids = df[dmu_col_name].astype(str)
+    else:
+        dmu_ids = df.index.astype(str)
+        if dmu_ids.name is None:
+            dmu_ids.name = "DMU_Index"
+
+    return pd.DataFrame({
+        dmu_col_name: dmu_ids,
+        "efficiency": np.round(eff_scores, 6),
+        "model": model.upper(),
+        "orientation": orientation,
+        "super_eff": bool(super_eff),
+    })
+
+# ------------------------------------------------------------------
+# 3. Función pública: run_ccr
 # ------------------------------------------------------------------
 def run_ccr(
     df: pd.DataFrame,
@@ -128,7 +168,6 @@ def run_ccr(
         eff_val = float(obj.value)
         lambdas_opt = lambdas_var.value if lambdas_var.value is not None else np.zeros((len(ref_indices), 1))
 
-        # Cálculo de slacks post-eficiencia
         if orientation == "input":
             slacks_in_vals = (eff_val * x0) - (X_ref @ lambdas_opt)
             slacks_out_vals = (Y_ref @ lambdas_opt) - y0
@@ -151,7 +190,7 @@ def run_ccr(
 
 
 # ------------------------------------------------------------------
-# 3. Función pública: run_bcc
+# 4. Función pública: run_bcc
 # ------------------------------------------------------------------
 def run_bcc(
     df: pd.DataFrame,
@@ -210,38 +249,3 @@ def run_bcc(
         eff_val = float(obj.value)
         bcc_eff = 1/eff_val if orientation == 'output' else eff_val
         lambdas_opt = lambdas_var.value if lambdas_var.value is not None else np.zeros((len(ref_indices), 1))
-        
-        ccr_eff_series = df_ccr_results.loc[df_ccr_results[dmu_column] == dmus[i], "tec_efficiency_ccr"]
-        ccr_eff = ccr_eff_series.iloc[0] if not ccr_eff_series.empty else np.nan
-        scale_eff = (ccr_eff / bcc_eff) if not np.isnan(bcc_eff) and not np.isnan(ccr_eff) and bcc_eff != 0 else np.nan
-
-        # Cálculo de slacks
-        if orientation == "input":
-            slacks_in_vals = (eff_val * x0) - (X_ref @ lambdas_opt)
-            slacks_out_vals = (Y_ref @ lambdas_opt) - y0
-        else:
-            slacks_in_vals = x0 - (X_ref @ lambdas_opt)
-            slacks_out_vals = (Y_ref @ lambdas_opt) - (eff_val * y0)
-        
-        slacks_in_vals[slacks_in_vals < 1e-9] = 0
-        slacks_out_vals[slacks_out_vals < 1e-9] = 0
-
-        # Identificación de retornos a escala
-        rts_label = "VRS"
-        dual_val = convexity_constraint.dual_value
-        if dual_val is not None:
-            if abs(dual_val) < 1e-6: rts_label = "CRS"
-            elif dual_val < 0: rts_label = "IRS"
-            else: rts_label = "DRS"
-        
-        registros.append({
-            dmu_column: dmus[i],
-            "efficiency": np.round(bcc_eff, 6),
-            "model": "BCC", "orientation": orientation, "super_eff": bool(super_eff),
-            "lambda_vector": {dmus_ref[j]: float(v) for j, v in enumerate(lambdas_opt.flatten())},
-            "slacks_inputs": {input_cols[k]: float(v) for k, v in enumerate(slacks_in_vals.flatten())},
-            "slacks_outputs": {output_cols[r]: float(v) for r, v in enumerate(slacks_out_vals.flatten())},
-            "scale_efficiency": np.round(scale_eff, 6) if not np.isnan(scale_eff) else np.nan,
-            "rts_label": rts_label
-        })
-    return pd.DataFrame(registros)
