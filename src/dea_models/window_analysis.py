@@ -2,8 +2,8 @@
 import pandas as pd
 import numpy as np
 
-from .radial import run_ccr   
-from .utils import validate_dataframe
+from src.dea_models.radial import run_ccr   # Corregido a importación absoluta
+from src.dea_models.utils import validate_dataframe # Corregido a importación absoluta
 
 def run_window_dea(
     df_panel: pd.DataFrame,
