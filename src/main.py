@@ -4,7 +4,8 @@ import streamlit as st
 import pandas as pd
 import datetime
 
-# Importaciones corregidas a absolutas (sin el punto inicial)
+# Importaciones corregidas a absolutas (sin el prefijo 'src.' ni el punto inicial)
+# Asumiendo que data_validator.py, results.py, etc., están en la misma carpeta 'src'.
 from data_validator import validate
 from results import mostrar_resultados, plot_benchmark_spider, plot_efficiency_histogram, plot_3d_inputs_outputs
 from report_generator import generate_html_report, generate_excel_report
