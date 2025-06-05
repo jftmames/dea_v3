@@ -23,7 +23,6 @@ def mostrar_resultados(
     resultados = {"model_type": model_type, "orientation": orientation}
 
     # El modelo BCC necesita los resultados de CCR para calcular la eficiencia de escala.
-    # Por tanto, ejecutamos CCR siempre que se pida BCC.
     df_ccr_results = run_ccr(
         df=df,
         dmu_column=dmu_column,
@@ -40,13 +39,13 @@ def mostrar_resultados(
             dmu_column=dmu_column,
             input_cols=inputs,
             output_cols=outputs,
-            df_ccr_results=df_ccr_results, # Se lo pasamos
+            df_ccr_results=df_ccr_results,
             orientation=orientation
         )
     else:
         raise ValueError("El tipo de modelo debe ser 'CCR' o 'BCC'")
 
-    # Renombrar columna de eficiencia para que los gráficos funcionen con un nombre estándar
+    # Renombrar columna de eficiencia para un nombre estándar en los gráficos
     if "tec_efficiency_ccr" in df_main_results.columns:
         df_plot_ready = df_main_results.rename(columns={"tec_efficiency_ccr": "efficiency"})
     else:
