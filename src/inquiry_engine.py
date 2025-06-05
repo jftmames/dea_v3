@@ -1,5 +1,4 @@
 # src/inquiry_engine.py
-
 import os
 import json
 import re
@@ -9,7 +8,7 @@ import pandas as pd
 from openai import OpenAI
 import plotly.graph_objects as go
 
-from data_validator import _llm_suggest
+from .data_validator import _llm_suggest # Changed to relative import
 
 # Inicializar cliente OpenAI
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -111,24 +110,31 @@ def _tree_is_valid(tree: Dict[str, Any]) -> bool:
     """
     if not tree:
         return False
-    first_key = next(iter(tree))
-    # Válido si no contiene el ícono de placeholder y hay ≥2 subnodos o más niveles
-    is_placeholder = "ℹ️" in tree.get(first_key, {})
-    tiene_dos_o_mas = len(tree[first_key]) >= 2
-    tiene_nivel_extra = any(isinstance(v, dict) for v in tree[first_key].values())
-    return not is_placeholder and (tiene_dos_o_mas or tiene_nivel_extra)
+    first_key = next(iter(tree)) # Get the first (and usually only) root question
+    # Check if the placeholder icon is present in the value of the root key (which should be a dict of subquestions)
+    is_placeholder_icon_present = "ℹ️" in str(tree.get(first_key, {}))
+    
+    # Check if the root has at least two direct children (subnodes)
+    has_two_or_more_subnodes = isinstance(tree.get(first_key), dict) and len(tree[first_key]) >= 2
+    
+    # Check if there's at least one subnode that itself is a dictionary (indicating more levels)
+    has_extra_level = isinstance(tree.get(first_key), dict) and any(isinstance(v, dict) for v in tree[first_key].values())
+    
+    # A tree is valid if it's not a placeholder AND it has at least two subnodes OR has deeper levels.
+    return not is_placeholder_icon_present and (has_two_or_more_subnodes or has_extra_level)
+
 
 # ---- Árbol placeholder por defecto ----
 def _fallback_tree(root_q: str) -> Dict[str, Any]:
     return {
         root_q: {
             "¿Exceso de inputs?": {
-                "¿Qué input consume más que los peers?": {},
-                "¿Se puede reducir un 10 % sin afectar output?": {},
+                "¿Qué input consume más que los peers?": {"ℹ️: Revise el uso de recursos comparado con los eficientes."},
+                "¿Se puede reducir un 10 % sin afectar output?": {"ℹ️: Considere ajustes en la escala de operación."},
             },
             "¿Déficit de outputs?": {
-                "¿Output clave por debajo de la media eficiente?": {},
-                "¿Implementar benchmarking con DMU eficiente?": {},
+                "¿Output clave por debajo de la media eficiente?": {"ℹ️: Identifique productos o servicios con bajo rendimiento."},
+                "¿Implementar benchmarking con DMU eficiente?": {"ℹ️: Analice las mejores prácticas de DMUs eficientes."},
             },
         }
     }
@@ -147,6 +153,8 @@ def suggest_input_range(
     df_head_json = df.head().to_json(orient="records")
 
     # Invocar al LLM a través de data_validator._llm_suggest
+    # NOTE: _llm_suggest expects input_cols and output_cols lists.
+    # We are asking for a suggestion on a single input, so pass it as [input_name]
     res = _llm_suggest(df_head_json, [input_name], [])
 
     if not res or "suggested_fixes" not in res:
@@ -156,30 +164,27 @@ def suggest_input_range(
     if not fixes:
         return None
 
-    # Tomar la primera sugerencia textual
     suggestion_text = fixes[0]
 
-    # Intentar extraer un rango numérico en formato [min, max]
-    match = re.search(r"\[\s*([0-9.+-eE]+)\s*,\s*([0-9.+-eE]+)\s*\]", suggestion_text)
+    # Try to extract a numerical range in [min, max] format
+    match = re.search(r"\[\s*([0-9.]+)\s*,\s*([0-9.]+)\s*\]", suggestion_text)
     if match:
         try:
             min_sug = float(match.group(1))
             max_sug = float(match.group(2))
             return min_sug, max_sug, suggestion_text
         except ValueError:
-            # Si no se parsea a float correctamente, seguir al fallback
             pass
 
-    # Si no se encontró rango con corchetes, intentar extraer dos números cualesquiera
+    # If no bracketed range found, try to extract two numbers anywhere
     nums = re.findall(r"([0-9]+(?:\.[0-9]+)?)", suggestion_text)
     if len(nums) >= 2:
         try:
-            # Tomar los dos primeros como min y max
             min_sug = float(nums[0])
             max_sug = float(nums[1])
             return min_sug, max_sug, suggestion_text
         except ValueError:
             pass
 
-    # Si no se pudo extraer rango, devolver toda la sugerencia como cita
+    # If no range could be extracted, return None
     return None
