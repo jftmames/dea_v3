@@ -1,9 +1,10 @@
 # src/dea_models/window_analysis.py
+
 import pandas as pd
 import numpy as np
 
-from src.dea_models.radial import run_ccr   # Corregido a importación absoluta
-from src.dea_models.utils import validate_dataframe # Corregido a importación absoluta
+from .radial import run_ccr   
+from .utils import validate_dataframe
 
 def run_window_dea(
     df_panel: pd.DataFrame,
