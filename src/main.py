@@ -12,8 +12,7 @@ if script_dir not in sys.path:
 
 # --- 1) Importaciones ---
 from results import mostrar_resultados
-from inquiry_engine import generate_inquiry, to_plotly_tree
-from epistemic_metrics import compute_eee
+from inquiry_engine import suggest_actionable_variables # <-- CAMBIO DE NOMBRE
 from openai_helpers import generate_analysis_proposals
 from dea_models.visualizations import plot_hypothesis_distribution, plot_benchmark_spider
 
@@ -22,18 +21,14 @@ st.set_page_config(layout="wide", page_title="DEA Deliberativo con IA")
 
 # --- 3) Funciones de estado y caché ---
 def initialize_state():
-    """Inicializa/resetea el estado de la sesión."""
     for key in list(st.session_state.keys()):
-        if not key.startswith('_'):
-            del st.session_state[key]
+        if not key.startswith('_'): del st.session_state[key]
     st.session_state.app_status = "initial"
-    st.session_state.plot_variable_name = None
 
 def reset_analysis_state():
-    """Resetea el estado cuando cambia la configuración del modelo."""
     st.session_state.app_status = "proposal_selected"
     st.session_state.dea_results = None
-    st.session_state.inquiry_tree = None
+    st.session_state.actionable_suggestions = None
     st.session_state.plot_variable_name = None
 
 if 'app_status' not in st.session_state:
@@ -44,8 +39,8 @@ def run_dea_analysis(_df, dmu_col, input_cols, output_cols):
     return mostrar_resultados(_df.copy(), dmu_col, input_cols, output_cols)
 
 @st.cache_data
-def run_inquiry_engine(root_question, _context):
-    return generate_inquiry(root_question, context=_context)
+def get_actionable_suggestions(_context): # <-- CAMBIO DE NOMBRE
+    return suggest_actionable_variables(context=_context)
 
 @st.cache_data
 def get_analysis_proposals(_df):
@@ -116,87 +111,44 @@ if st.session_state.app_status != "initial":
 
         results = st.session_state.dea_results
         
-        if st.session_state.app_status in ["results_ready", "inquiry_done"]:
-            st.header("Paso 4: Razona y Explora las Causas con IA", divider="blue")
+        # ETAPA 4: Sugerencias de la IA y Exploración Interactiva
+        if st.session_state.app_status in ["results_ready", "suggestions_done"]:
+            st.header("Paso 4: Explora las Causas de la Ineficiencia", divider="blue")
             
-            if st.button("Generar Hipótesis de Ineficiencia con IA", use_container_width=True):
-                 with st.spinner("La IA está razonando sobre los resultados..."):
-                    avg_eff = results["df_ccr"]["tec_efficiency_ccr"].mean()
-                    context = {"inputs": proposal['inputs'], "outputs": proposal['outputs'], "avg_efficiency_ccr": avg_eff}
-                    root_question = f"Bajo el enfoque '{proposal['title']}', ¿cuáles son las principales causas de la ineficiencia?"
-                    tree, error = run_inquiry_engine(root_question, context)
+            if 'actionable_suggestions' not in st.session_state or st.session_state.actionable_suggestions is None:
+                with st.spinner("La IA está identificando las variables clave para investigar la ineficiencia..."):
+                    context = {"inputs": proposal['inputs'], "outputs": proposal['outputs'], "avg_efficiency_ccr": results["df_ccr"]["tec_efficiency_ccr"].mean()}
+                    suggestions, error = get_actionable_suggestions(context)
                     if error: st.error(f"Error: {error}")
-                    st.session_state.inquiry_tree = tree
-                    st.session_state.plot_variable_name = None
-                    st.session_state.app_status = "inquiry_done"
+                    st.session_state.actionable_suggestions = suggestions
+                    st.session_state.app_status = "suggestions_done"
 
-            if st.session_state.get("inquiry_tree"):
-                col_tree, col_eee = st.columns([2, 1])
-                with col_tree:
-                    st.subheader("Árbol de Indagación", anchor=False)
-                    st.plotly_chart(to_plotly_tree(st.session_state.inquiry_tree), use_container_width=True)
-                with col_eee:
-                    st.subheader("Calidad del Razonamiento (EEE)", anchor=False)
-                    eee_metrics = compute_eee(st.session_state.inquiry_tree, depth_limit=3, breadth_limit=5)
-                    st.metric(label="Índice de Equilibrio Erotético (EEE)", value=f"{eee_metrics['score']:.2%}")
+            if st.session_state.get("actionable_suggestions"):
+                st.info("La IA sugiere que las siguientes variables son las más relevantes para entender la ineficiencia. Haz clic en una para analizarla visualmente.")
                 
-                st.subheader("Exploración Interactiva de Hipótesis", anchor=False)
-                placeholder = st.container()
-
-                leaf_nodes = []
-                def find_leaves(node):
-                    if not isinstance(node, dict) or not node: return
-                    is_leaf = True
-                    for value in node.values():
-                        if isinstance(value, dict) and value:
-                            is_leaf = False
-                            find_leaves(value)
-                    if is_leaf: leaf_nodes.extend(list(node.keys()))
-                find_leaves(st.session_state.inquiry_tree)
+                placeholder = st.container() # Contenedor para el gráfico
                 
-                st.info("Haz clic en una hipótesis para analizar los datos correspondientes.")
+                # Crear los botones de exploración
+                cols = st.columns(len(st.session_state.actionable_suggestions))
+                for i, suggestion in enumerate(st.session_state.actionable_suggestions):
+                    with cols[i]:
+                        if st.button(f"Analizar '{suggestion['variable']}'", key=suggestion['variable'], use_container_width=True):
+                            st.session_state.plot_variable_name = suggestion['variable']
+                            st.session_state.plot_variable_reasoning = suggestion['reasoning']
                 
-                # --- LÓGICA DE BOTONES MEJORADA ---
-                actionable_nodes_count = 0
-                cols = st.columns(3)
-                col_idx = 0
-
-                all_model_vars = proposal['inputs'] + proposal['outputs']
-
-                for node in leaf_nodes:
-                    # Intenta encontrar una variable de forma más flexible
-                    found_var = None
-                    # Primero, con el formato estricto
-                    match = re.search(r"Analizar (input|output): \[(.*?)\]", node)
-                    if match:
-                        found_var = match.group(2).strip()
-                    else:
-                        # Si falla, busca cualquier nombre de variable en el texto
-                        for var in all_model_vars:
-                            if f"'{var}'" in node or f'"{var}"' in node or f" {var} " in node:
-                                found_var = var
-                                break
-                    
-                    if found_var:
-                        actionable_nodes_count += 1
-                        with cols[col_idx % 3]:
-                            if st.button(f"Explorar: {node}", key=node, use_container_width=True):
-                                st.session_state.plot_variable_name = found_var
-                                st.rerun()
-                        col_idx += 1
-                
-                if actionable_nodes_count == 0 and leaf_nodes:
-                    st.warning("La IA generó hipótesis, pero no se encontraron variables accionables para analizar visualmente en ellas. Intenta generar las hipótesis de nuevo.")
-
-
+                # Si hay una variable seleccionada, mostrar el gráfico
                 if st.session_state.get("plot_variable_name"):
                     var_to_plot = st.session_state.plot_variable_name
+                    reasoning = st.session_state.plot_variable_reasoning
                     with placeholder:
-                        st.markdown(f"#### Análisis de la hipótesis: '{var_to_plot}'")
+                        st.markdown(f"#### Análisis de la variable: `{var_to_plot}`")
+                        st.caption(f"Razonamiento de la IA: *{reasoning}*")
                         with st.spinner(f"Generando gráfico para '{var_to_plot}'..."):
                             fig = plot_hypothesis_distribution(
-                                df_results=results['df_ccr'], df_original=df,
-                                variable=var_to_plot, dmu_col=df.columns[0]
+                                df_results=results['df_ccr'],
+                                df_original=df,
+                                variable=var_to_plot,
+                                dmu_col=df.columns[0]
                             )
                             st.plotly_chart(fig, use_container_width=True)
                             if st.button("Cerrar exploración"):
@@ -204,29 +156,28 @@ if st.session_state.app_status != "initial":
                                 st.rerun()
 
         # ETAPA 5: Resultados Detallados
-        if st.session_state.app_status in ["results_ready", "inquiry_done"]:
-            st.header("Paso 5: Resultados Numéricos y Gráficos Detallados", divider="blue")
-            tab_ccr, tab_bcc = st.tabs(["**Resultados CCR**", "**Resultados BCC**"])
-            
-            with tab_ccr:
-                st.subheader("Tabla de Eficiencias y Slacks (Modelo CCR)")
-                st.dataframe(results.get("df_ccr"))
-                st.subheader("Visualizaciones de Eficiencia (CCR)")
-                if "hist_ccr" in results and "scatter3d_ccr" in results:
-                    col1, col2 = st.columns(2)
-                    with col1: st.plotly_chart(results["hist_ccr"], use_container_width=True)
-                    with col2: st.plotly_chart(results["scatter3d_ccr"], use_container_width=True)
-                st.subheader("Análisis de Benchmarking (CCR)")
-                dmu_options_ccr = results.get("df_ccr", pd.DataFrame()).get(df.columns[0], []).astype(str).tolist()
-                if dmu_options_ccr:
-                    selected_dmu_ccr = st.selectbox("Seleccionar DMU para comparar con sus benchmarks:", options=dmu_options_ccr, key="dmu_ccr_spider")
-                    if selected_dmu_ccr and "merged_ccr" in results:
-                        spider_fig_ccr = plot_benchmark_spider(results["merged_ccr"], selected_dmu_ccr, proposal['inputs'], proposal['outputs'])
-                        st.plotly_chart(spider_fig_ccr, use_container_width=True)
+        st.header("Paso 5: Resultados Numéricos y Gráficos Detallados", divider="blue")
+        tab_ccr, tab_bcc = st.tabs(["**Resultados CCR**", "**Resultados BCC**"])
+        
+        with tab_ccr:
+            st.subheader("Tabla de Eficiencias y Slacks (Modelo CCR)")
+            st.dataframe(results.get("df_ccr"))
+            st.subheader("Visualizaciones de Eficiencia (CCR)")
+            if "hist_ccr" in results and "scatter3d_ccr" in results:
+                col1, col2 = st.columns(2)
+                with col1: st.plotly_chart(results["hist_ccr"], use_container_width=True)
+                with col2: st.plotly_chart(results["scatter3d_ccr"], use_container_width=True)
+            st.subheader("Análisis de Benchmarking (CCR)")
+            dmu_options_ccr = results.get("df_ccr", pd.DataFrame()).get(df.columns[0], []).astype(str).tolist()
+            if dmu_options_ccr:
+                selected_dmu_ccr = st.selectbox("Seleccionar DMU para comparar con sus benchmarks:", options=dmu_options_ccr, key="dmu_ccr_spider")
+                if selected_dmu_ccr and "merged_ccr" in results:
+                    spider_fig_ccr = plot_benchmark_spider(results["merged_ccr"], selected_dmu_ccr, proposal['inputs'], proposal['outputs'])
+                    st.plotly_chart(spider_fig_ccr, use_container_width=True)
 
-            with tab_bcc:
-                st.subheader("Tabla de Eficiencias y Slacks (Modelo BCC)")
-                st.dataframe(results.get("df_bcc"))
-                st.subheader("Visualización de Eficiencia (BCC)")
-                if "hist_bcc" in results:
-                    st.plotly_chart(results["hist_bcc"], use_container_width=True)
+        with tab_bcc:
+            st.subheader("Tabla de Eficiencias y Slacks (Modelo BCC)")
+            st.dataframe(results.get("df_bcc"))
+            st.subheader("Visualización de Eficiencia (BCC)")
+            if "hist_bcc" in results:
+                st.plotly_chart(results["hist_bcc"], use_container_width=True)
