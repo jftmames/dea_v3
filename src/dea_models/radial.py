@@ -3,7 +3,7 @@ import numpy as np
 import cvxpy as cp
 import pandas as pd
 
-from .utils import validate_positive_dataframe, validate_dataframe
+from src.dea_models.utils import validate_positive_dataframe, validate_dataframe # Corregido a importación absoluta
 
 # ------------------------------------------------------------------
 # 1. Núcleo DEA (CCR / BCC) — input/output orientation
@@ -295,7 +295,7 @@ def run_bcc(
         raise ValueError(f"La columna DMU '{dmu_column}' no existe en el DataFrame.")
 
     # 2) Validar que los inputs/outputs sean numéricos y > 0
-    from .utils import validate_dataframe
+    from src.dea_models.utils import validate_dataframe # Corregido a importación absoluta
     validate_dataframe(df, input_cols, output_cols, allow_zero=False, allow_negative=False)
 
     # 3) Preparar X (inputs) y Y (outputs)
@@ -445,7 +445,7 @@ def run_bcc(
         # 9) Determinación de RTS (RTS_label)
         rts_label = "VRS" 
         if prob.status in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE]:
-            if len(prob.constraints) > 0 and prob.constraints[-1].is_dual_ проє_known():
+            if len(prob.constraints) > 0 and prob.constraints[-1].is_dual_ proyectos_known():
                 dual_sum_lambda_constraint = prob.constraints[-1].dual_value
                 if dual_sum_lambda_constraint is not None:
                     if abs(dual_sum_lambda_constraint) < 1e-6: 
