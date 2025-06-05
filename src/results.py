@@ -1,8 +1,9 @@
+# src/results.py
 import pandas as pd
 import plotly.express as px
 
-from dea_models.radial import run_ccr, run_bcc
-from dea_models import plot_benchmark_spider  # importamos la función del paquete
+from .dea_models.radial import run_ccr, run_bcc # Changed to relative import
+from .dea_models.visualizations import plot_benchmark_spider, plot_efficiency_histogram, plot_3d_inputs_outputs # Changed to relative import
 
 
 def mostrar_resultados(
@@ -44,8 +45,16 @@ def mostrar_resultados(
         super_eff=False
     )
     # RENOMBRAR la columna tec_efficiency_bcc → efficiency
-    df_bcc = df_bcc.rename(columns={"tec_efficiency_bcc": "efficiency"})
+    # Ensure this column actually exists before renaming.
+    if "efficiency" not in df_bcc.columns and "tec_efficiency_bcc" in df_bcc.columns:
+        df_bcc = df_bcc.rename(columns={"tec_efficiency_bcc": "efficiency"})
+    elif "efficiency" not in df_bcc.columns: # If neither exists, something is wrong
+        # This case should ideally be caught by run_bcc returning a well-formed DF
+        # For robustness, we could add a placeholder or error.
+        # But given the contract of run_bcc, 'efficiency' should be present.
+        pass
     resultados["df_bcc"] = df_bcc # Guardar en el diccionario
+
 
     # 3) Unir resultados de eficiencia con df original (ahora 'efficiency' es el nombre común)
     merged_ccr = df_ccr.merge(df, on=dmu_column, how="left")
@@ -69,53 +78,6 @@ def mostrar_resultados(
     return resultados
 
 
-def plot_efficiency_histogram(dea_df: pd.DataFrame, bins: int = 20):
-    """
-    Devuelve un histograma de eficiencias DEA usando Plotly Express.
-    Asume que dea_df tiene la columna 'efficiency'.
-    """
-    fig = px.histogram(
-        dea_df,
-        x="efficiency",
-        nbins=bins,
-        title="Distribución de eficiencias",
-        labels={"efficiency": "Eficiencia DEA"},
-    )
-    fig.update_layout(margin=dict(l=40, r=40, t=40, b=40))
-    return fig
-
-
-def plot_3d_inputs_outputs(
-    orig_df: pd.DataFrame,
-    inputs: list[str],
-    outputs: list[str],
-    dea_df: pd.DataFrame,
-    dmu_column: str
-):
-    """
-    Scatter 3D: ejes = primeros 2 inputs, tercer eje = primer output,
-    coloreado según eficiencia. dea_df debe tener dmu_column y 'efficiency'.
-    """
-    merged = dea_df.merge(orig_df, on=dmu_column, how="left")
-
-    x_col = inputs[0]
-    y_col = inputs[1] if len(inputs) >= 2 else inputs[0]
-    z_col = outputs[0]
-
-    if x_col not in merged.columns or y_col not in merged.columns or z_col not in merged.columns:
-        raise ValueError(f"Columnas {x_col}, {y_col} o {z_col} no existen en los datos combinados.")
-
-    fig = px.scatter_3d(
-        merged,
-        x=x_col,
-        y=y_col,
-        z=z_col,
-        color="efficiency",
-        hover_name=dmu_column,
-        title="Scatter 3D de Inputs vs Output (coloreado por eficiencia)",
-        labels={x_col: x_col, y_col: y_col, z_col: z_col, "efficiency": "Eficiencia"},
-    )
-    fig.update_layout(margin=dict(l=40, r=40, t=40, b=40))
-    return fig
-
-# Ya no definimos plot_benchmark_spider aquí; se importa desde dea_models.
+# The functions plot_efficiency_histogram and plot_3d_inputs_outputs are
+# defined in dea_models/visualizations.py and imported here.
+# So, they don't need to be redefined in this file.
