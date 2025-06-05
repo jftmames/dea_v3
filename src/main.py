@@ -78,7 +78,7 @@ def load_full_session(session_data):
             if isinstance(v, list):
                 dea_results_reloaded[k] = pd.DataFrame(v)
     # Volver a generar las figuras que no se guardan
-    if dea_results_reloaded and not dea_results_reloaded['df_ccr'].empty:
+    if dea_results_reloaded and not dea_results_reloaded.get('df_ccr', pd.DataFrame()).empty:
         dea_results_reloaded['hist_ccr'] = plot_efficiency_histogram(dea_results_reloaded['df_ccr'])
         dea_results_reloaded['hist_bcc'] = plot_efficiency_histogram(dea_results_reloaded['df_bcc'])
         dea_results_reloaded['scatter3d_ccr'] = plot_3d_inputs_outputs(st.session_state.df, st.session_state.input_cols, st.session_state.output_cols, dea_results_reloaded['df_ccr'], st.session_state.dmu_col)
@@ -140,7 +140,9 @@ if st.session_state.df is not None:
     col1, col2 = st.columns(2)
     with col1:
         all_columns = df.columns.tolist()
-        st.selectbox("Columna de DMU", all_columns, index=all_columns.index(st.session_state.dmu_col) if st.session_state.dmu_col in all_columns else 0, key='dmu_col')
+        # La clave es usar .get() para evitar el error si la clave no existe aún
+        dmu_index = all_columns.index(st.session_state.dmu_col) if st.session_state.dmu_col in all_columns else 0
+        st.selectbox("Columna de DMU", all_columns, index=dmu_index, key='dmu_col')
     with col2:
         st.multiselect("Columnas de Inputs", [c for c in all_columns if c != st.session_state.dmu_col], key='input_cols', default=st.session_state.input_cols)
         st.multiselect("Columnas de Outputs", [c for c in all_columns if c not in [st.session_state.dmu_col] + st.session_state.input_cols], key='output_cols', default=st.session_state.output_cols)
@@ -155,21 +157,22 @@ if st.session_state.df is not None:
                 df_hash = pd.util.hash_pandas_object(df).sum()
                 st.session_state.inquiry_tree, st.session_state.eee_score = get_inquiry_and_eee("Diagnóstico de ineficiencia", context, df_hash)
                 
-                # Procesar resultados para guardar y mostrar
                 tree_data_list = []
-                def flatten_tree(node, parent_path=""):
-                    for key, value in node.items():
-                        if isinstance(value, dict):
+                if st.session_state.inquiry_tree:
+                    def flatten_tree(node, parent_path=""):
+                        for key, value in node.items():
+                            full_path = f"{parent_path} -> {key}" if parent_path else key
                             tree_data_list.append({"Nodo": key, "Padre": parent_path or "Raíz"})
-                            flatten_tree(value, key)
-                if st.session_state.inquiry_tree: 
+                            if isinstance(value, dict):
+                                flatten_tree(value, key)
+                    
                     root_key = list(st.session_state.inquiry_tree.keys())[0]
+                    tree_data_list.append({"Nodo": root_key, "Padre": "Raíz"})
                     flatten_tree(st.session_state.inquiry_tree[root_key], root_key)
 
                 st.session_state.df_tree = pd.DataFrame(tree_data_list)
                 st.session_state.df_eee = pd.DataFrame([{"Métrica": "EEE Score", "Valor": st.session_state.eee_score}])
                 
-                # --- CORRECCIÓN #1: ESTABLECER DMU POR DEFECTO ---
                 if st.session_state.dea_results and not st.session_state.dea_results["df_ccr"].empty:
                     st.session_state.selected_dmu = st.session_state.dea_results["df_ccr"][st.session_state.dmu_col].astype(str).tolist()[0]
                 
@@ -189,10 +192,11 @@ if st.session_state.app_status == "results_ready" and st.session_state.dea_resul
     st.subheader("🕷️ Benchmark Spider CCR")
     dmu_options = st.session_state.dea_results["df_ccr"][st.session_state.dmu_col].astype(str).tolist()
     
+    selected_dmu_index = dmu_options.index(st.session_state.selected_dmu) if st.session_state.selected_dmu in dmu_options else 0
     st.selectbox(
         "Seleccionar DMU para comparar:",
         options=dmu_options,
-        index=dmu_options.index(st.session_state.selected_dmu) if st.session_state.selected_dmu in dmu_options else 0,
+        index=selected_dmu_index,
         key="selected_dmu"
     )
     if st.session_state.selected_dmu:
