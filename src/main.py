@@ -133,7 +133,8 @@ if uploaded_file is not None:
     st.rerun()
 
 # --- Flujo principal de la UI ---
-if st.session_state.df is not None:
+# VERIFICACIÓN SEGURA: Comprobar si 'df' existe en el estado antes de usarlo
+if 'df' in st.session_state and st.session_state.df is not None:
     df = st.session_state.df
     st.subheader("Configuración del Análisis")
     
