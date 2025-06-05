@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import cvxpy as cp
 
-from .utils import validate_positive_dataframe
+from src.dea_models.utils import validate_positive_dataframe # Corregido a importación absoluta
 
 def run_network_dea(
     df: pd.DataFrame,
@@ -216,4 +216,4 @@ def run_multi_stage_network(
         fila["eff_overall"] = overall
         resultados.append(fila)
 
-    return pd.DataFrame(resultados)
+    return pd.DataFrame(resultados)  
