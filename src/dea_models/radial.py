@@ -1,3 +1,4 @@
+# src/dea_models/radial.py
 import numpy as np
 import cvxpy as cp
 import pandas as pd
@@ -82,10 +83,8 @@ def _dea_core(
                     eff[i] = float(theta.value) if theta.value is not None else np.nan
                 else:
                     eff[i] = float(phi_var.value) if phi_var.value is not None else np.nan
-                    if eff[i] != np.nan and eff[i] != 0: # For output, often efficiency is 1/phi_var if standard formulation is min 1/phi
-                           # Based on common output formulation max phi, eff is phi.value directly.
-                           # If it were min theta (where theta = 1/phi), then eff would be 1/theta.value
-                           pass # Sticking to phi_var.value as the efficiency score based on Maximize(phi_var)
+                    if eff[i] != np.nan and eff[i] != 0: 
+                           pass 
             else:
                 eff[i] = np.nan # Problem not solved optimally
         except cp.error.SolverError:
@@ -107,7 +106,7 @@ def _run_dea_internal(
     model: str = "CCR",
     orientation: str = "input",
     super_eff: bool = False,
-    dmu_col_name: str = "DMU" # Added to ensure DMU column is correctly identified
+    dmu_col_name: str = "DMU" 
 ) -> pd.DataFrame:
     """
     Ejecuta DEA (CCR/BCC, input/output, opcional super-eficiencia).
@@ -145,13 +144,12 @@ def _run_dea_internal(
         dmu_ids = df[dmu_col_name].astype(str)
     else:
         dmu_ids = df.index.astype(str)
-        if dmu_ids.name is None: # If index has no name, give it a default for consistency
+        if dmu_ids.name is None: 
             dmu_ids.name = "DMU_Index"
-        # dmu_col_name = dmu_ids.name # Update dmu_col_name if using index
 
     return pd.DataFrame({
         dmu_col_name: dmu_ids,
-        "efficiency": np.round(eff_scores, 6), # eff_scores should be eff_values
+        "efficiency": np.round(eff_scores, 6), 
         "model": model.upper(),
         "orientation": orientation,
         "super_eff": bool(super_eff),
@@ -166,7 +164,7 @@ def run_ccr(
     dmu_column: str,
     input_cols: list[str],
     output_cols: list[str],
-    orientation: str = "input", # Added orientation, though CCR is often input-oriented for theta
+    orientation: str = "input", 
     super_eff: bool = False
 ) -> pd.DataFrame:
     """
@@ -178,7 +176,6 @@ def run_ccr(
 
     # Validar que todos los inputs y outputs sean positivos
     cols_to_validate = input_cols + output_cols
-    # validate_positive_dataframe might modify df, so pass a copy if df is used later
     validate_positive_dataframe(df.copy(), cols_to_validate)
 
     # Matrices de datos
@@ -191,16 +188,14 @@ def run_ccr(
 
     resultados = []
     for i in range(n):
-        # Observaciones de la DMU i
         x0 = X[:, [i]]
         y0 = Y[:, [i]]
 
-        # Determine reference set and lambda variables based on super_eff
         if super_eff:
-            if n == 1: # Cannot run super-efficiency with only one DMU
+            if n == 1: 
                 resultados.append({
                     dmu_column: dmus[i],
-                    "tec_efficiency_ccr": 1.0, # Or np.nan
+                    "tec_efficiency_ccr": 1.0, 
                     "lambda_vector": {dmus[i]: 1.0},
                     "slacks_inputs": {col: 0.0 for col in input_cols},
                     "slacks_outputs": {col: 0.0 for col in output_cols},
@@ -219,14 +214,10 @@ def run_ccr(
             lambdas_var = cp.Variable((n, 1), nonneg=True)
             ref_dmus_indices = list(range(n))
 
-        # Decision variables for the two-stage CCR model (radial efficiency + slacks)
-        # Stage 1: Calculate radial efficiency (theta_rad for input, phi_rad for output)
-        # For CCR input-oriented model (standard):
         if orientation == "input":
             theta_rad = cp.Variable()
             cons_stage1 = [X_ref @ lambdas_var <= theta_rad * x0,
                            Y_ref @ lambdas_var >= y0]
-            # No sum(lambdas)==1 for CRS
             obj_stage1 = cp.Minimize(theta_rad)
         else: # Output-oriented CCR
             phi_rad = cp.Variable()
@@ -238,7 +229,6 @@ def run_ccr(
         prob_stage1.solve(solver=cp.ECOS, abstol=1e-7, reltol=1e-7, feastol=1e-7, verbose=False)
 
         if prob_stage1.status not in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE]:
-            # Handle solver failure for stage 1
             resultados.append({
                 dmu_column: dmus[i], "tec_efficiency_ccr": np.nan, "lambda_vector": {},
                 "slacks_inputs": {col: np.nan for col in input_cols},
@@ -249,62 +239,9 @@ def run_ccr(
         eff_val_rad = theta_rad.value if orientation == "input" else phi_rad.value
         if eff_val_rad is None: eff_val_rad = np.nan
 
-        # Stage 2: Maximize sum of slacks, given the radial efficiency
-        slacks_in_var = cp.Variable((m, 1), nonneg=True)
-        slacks_out_var = cp.Variable((s, 1), nonneg=True)
-
-        # Need to re-declare lambdas for stage 2 if they are to be re-optimized
-        # or use the lambdas from stage 1. For classic two-stage, lambdas are fixed.
-        # However, standard approach is to solve a new LP for slacks.
-        # For simplicity here, we use the envelope from *all* DMUs (or ref_set for super_eff)
-        # to find slacks for the specific x0, y0, using the calculated eff_val_rad.
-
-        if orientation == "input":
-            # Minimize -(sum(slacks_in) + sum(slacks_out)) which is Maximize sum of slacks
-            # Constraints use eff_val_rad * x0 for inputs
-            cons_stage2 = [X_ref @ lambdas_var + slacks_in_var == eff_val_rad * x0,
-                           Y_ref @ lambdas_var - slacks_out_var == y0]
-        else: # output-oriented
-            # For output orientation, eff_val_rad = phi
-            # Target outputs are eff_val_rad * y0. Inputs are x0.
-             cons_stage2 = [X_ref @ lambdas_var + slacks_in_var == x0,
-                           Y_ref @ lambdas_var - slacks_out_var == eff_val_rad * y0]
-            
-        # Objective for stage 2: Maximize sum of slacks
-        # Using a common approach: sum of normalized slacks, or simply sum of slacks.
-        # For simplicity, we can just solve the system of equations if lambdas are fixed.
-        # If lambdas are variable in stage 2, then Maximize cp.sum(slacks_in_var) + cp.sum(slacks_out_var)
-            
-        # Here, the provided code structure defines slacks_in, slacks_out as variables in a single problem.
-        # Let's stick to the original structure of run_ccr which seems to be a single stage model
-        # defining theta and slacks together for input orientation.
-            
-        # Reverting to a single-stage model for CCR that includes slacks, as per original structure
-        # This is an "enhanced" CCR model, not strictly two-stage as often described,
-        # but solves for theta and slacks simultaneously.
-        # This typically involves maximizing slacks after minimizing theta, or a weighted sum.
-        # The original code solves for theta, and then slacks are derived.
-        # For input orientation:
-        # Minimize theta - eps * (sum(s_in) + sum(s_out))
-        # s.t. X_lambda - s_in = theta * x0
-        #       Y_lambda + s_out = y0
-        #
-        # The original run_ccr used:
-        # cons.append(X @ lambdas + slacks_in == theta * x0)
-        # cons.append(Y @ lambdas - slacks_out == y0)
-        # obj = cp.Minimize(theta)
-        # This is not quite right as slacks are defined to be non-negative.
-        # X_lambda <= theta * x0  => X_lambda + s_in = theta * x0
-        # Y_lambda >= y0          => Y_lambda - s_out = y0
-
-        # Let's use the standard radial model and then calculate slacks based on optimal lambdas and theta/phi
-        # This is more aligned with _dea_core's approach.
-        # So, tec_efficiency_ccr is eff_val_rad.
-        # Then calculate slacks.
-
         tec_eff = eff_val_rad
         lambdas_opt = lambdas_var.value
-        if lambdas_opt is None: # If solver failed to find lambdas
+        if lambdas_opt is None: 
             lambdas_opt = np.zeros((lambdas_var.shape[0], 1))
 
         if orientation == "input":
@@ -314,11 +251,9 @@ def run_ccr(
             slacks_input_values = x0 - (X_ref @ lambdas_opt)
             slacks_output_values = (eff_val_rad * y0) - (Y_ref @ lambdas_opt)
             
-        # Ensure slacks are non-negative (due to numerical precision, they might be slightly negative)
         slacks_input_values[slacks_input_values < 0] = 0
         slacks_output_values[slacks_output_values < 0] = 0
 
-        # Populate lambdas_vals dictionary
         lambdas_vals = {}
         if lambdas_opt is not None:
             for idx, ref_idx in enumerate(ref_dmus_indices):
@@ -395,54 +330,44 @@ def run_bcc(
         if num_vars == 0:
             registros[i] = {
                 dmu_column: dmus[i],
-                "efficiency": 1.0 if orientation == "input" else 1.0, # Asumimos 1.0 de eficiencia en este caso
+                "efficiency": 1.0 if orientation == "input" else 1.0, 
                 "model": "BCC",
                 "orientation": orientation,
                 "super_eff": bool(super_eff),
-                "lambda_vector": {dmus[i]: 1.0}, # O vacío si no hay DMUs de referencia
+                "lambda_vector": {dmus[i]: 1.0}, 
                 "slacks_inputs": {col: 0.0 for col in input_cols},
                 "slacks_outputs": {col: 0.0 for col in output_cols},
-                "scale_efficiency": 1.0, # Asumimos 1.0 de eficiencia de escala
-                "rts_label": "VRS" # Default para BCC
+                "scale_efficiency": 1.0, 
+                "rts_label": "VRS" 
             }
-            continue # Pasar a la siguiente iteración
+            continue 
 
         # 5.2) Definir variables de decisión comunes
         lambdas_var = cp.Variable((num_vars, 1), nonneg=True)
         slacks_in = cp.Variable((m, 1), nonneg=True)
         slacks_out = cp.Variable((s, 1), nonneg=True)
 
-        # Inicializar tanto theta como phi a None para evitar UnboundLocalError
         theta = None
         phi = None
 
-        # vectores del i‐ésimo DMU
-        x_i = X[:, [i]]    # forma (m,1)
-        y_i = Y[:, [i]]    # forma (s,1)
+        x_i = X[:, [i]]    
+        y_i = Y[:, [i]]    
 
         # 5.3) Construir restricciones y objetivo según orientación
         constraints: list = []
         if orientation == "input":
-            # Input‐oriented BCC: minimizamos theta
-            #   Y_ref @ λ + slacks_out >= y_i  (outputs producidos son al menos los observados)
-            #   X_ref @ λ <= theta * x_i - slacks_in (inputs usados son a lo sumo una fracción de los observados, menos el slack)
-            #   Σ λ == 1
             theta = cp.Variable()
             constraints += [
                 Y_ref @ lambdas_var + slacks_out >= y_i,
-                X_ref @ lambdas_var <= theta * x_i - slacks_in, # Corrección: - slacks_in
+                X_ref @ lambdas_var <= theta * x_i - slacks_in, 
                 cp.sum(lambdas_var) == 1
             ]
             objective = cp.Minimize(theta)
 
         else:
-            # Output‐oriented BCC: maximizamos phi
-            #   Y_ref @ λ >= phi * y_i + slacks_out (outputs producidos son al menos una fracción de los observados, más el slack)
-            #   X_ref @ λ + slacks_in <= x_i       (inputs usados son a lo sumo los observados)
-            #   Σ λ == 1
             phi = cp.Variable()
             constraints += [
-                Y_ref @ lambdas_var >= phi * y_i + slacks_out, # Corrección: + slacks_out
+                Y_ref @ lambdas_var >= phi * y_i + slacks_out, 
                 X_ref @ lambdas_var + slacks_in <= x_i,
                 cp.sum(lambdas_var) == 1
             ]
@@ -468,23 +393,21 @@ def run_bcc(
                 phi_val = phi.value
                 current_eff_val = float(phi_val) if phi_val is not None else np.nan
 
-        eff[i] = current_eff_val # Asignar el valor a la matriz de eficiencias
+        eff[i] = current_eff_val 
 
         # 7) Extraer slacks; si .value es None, usar ceros
-        # Asegurarse de que los slacks se calculen correctamente incluso si el solver devuelve None
         if slacks_in.value is None:
             slack_in_arr = np.zeros((m, 1))
         else:
             slack_in_arr = slacks_in.value
-            slack_in_arr[slack_in_arr < 1e-9] = 0 # Umbral para cero
+            slack_in_arr[slack_in_arr < 1e-9] = 0 
 
         if slacks_out.value is None:
             slack_out_arr = np.zeros((s, 1))
         else:
             slack_out_arr = slacks_out.value
-            slack_out_arr[slack_out_arr < 1e-9] = 0 # Umbral para cero
+            slack_out_arr[slack_out_arr < 1e-9] = 0 
 
-        # Construir diccionarios {input_col: valor_slack} y {output_col: valor_slack}
         slacks_input = { input_cols[k]: float(slack_in_arr[k, 0]) for k in range(m) }
         slacks_output = { output_cols[r]: float(slack_out_arr[r, 0]) for r in range(s) }
         
@@ -495,7 +418,7 @@ def run_bcc(
             input_cols=input_cols,
             output_cols=output_cols,
             orientation=orientation,
-            super_eff=False # Siempre contra la frontera completa para la eficiencia de escala
+            super_eff=False 
         )
         
         ccr_eff_series = df_ccr_for_scale.loc[df_ccr_for_scale[dmu_column] == dmus[i], "tec_efficiency_ccr"]
@@ -505,49 +428,36 @@ def run_bcc(
             ccr_eff = ccr_eff_series.iloc[0]
 
         scale_eff = np.nan
-        # TE_CRS = ccr_eff, TE_VRS = current_eff_val
-        # Para orientación input: SE = TE_CRS / TE_VRS = theta_CRS / theta_VRS
-        # Para orientación output: SE = TE_CRS / TE_VRS = phi_CRS / phi_VRS
         if current_eff_val is not None and ccr_eff is not None and current_eff_val != 0 and not np.isnan(current_eff_val) and not np.isnan(ccr_eff):
-            # Si current_eff_val es 0 o NaN, scale_eff también debería ser NaN o indefinido
             if orientation == "input":
-                # Eficiencia CCR (theta_CRS) / Eficiencia BCC (theta_VRS)
                 scale_eff = ccr_eff / current_eff_val
-            else: # output orientation
-                # Eficiencia CCR (phi_CRS) / Eficiencia BCC (phi_VRS)
+            else: 
                 scale_eff = ccr_eff / current_eff_val
         
-        # Lambda values
         lambdas_vals = {}
         if lambdas_var.value is not None:
-            for idx, ref_idx in enumerate(dmus_ref): # Usar dmus_ref aquí para mapear a los DMUs de referencia
-                lambdas_vals[ref_idx] = float(lambdas_var.value[idx,0])
+            for idx, ref_dmu_id in enumerate(dmus_ref): 
+                lambdas_vals[ref_dmu_id] = float(lambdas_var.value[idx,0])
         else:
-            for ref_idx in dmus_ref: # Si no hay valor, establecer a NaN
-                lambdas_vals[ref_idx] = np.nan
+            for ref_dmu_id in dmus_ref: 
+                lambdas_vals[ref_dmu_id] = np.nan
 
         # 9) Determinación de RTS (RTS_label)
-        rts_label = "VRS" # Default para BCC
+        rts_label = "VRS" 
         if prob.status in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE]:
-            # La restricción de suma de lambdas es la última (cp.sum(lambdas) == 1)
-            # El valor dual en prob.constraints[-1].dual_value determina el RTS local
-            if len(prob.constraints) > 0:
+            if len(prob.constraints) > 0 and prob.constraints[-1].is_dual_ проє_known():
                 dual_sum_lambda_constraint = prob.constraints[-1].dual_value
                 if dual_sum_lambda_constraint is not None:
-                    if abs(dual_sum_lambda_constraint) < 1e-6: # Umbral para considerar un valor cercano a cero
-                        rts_label = "CRS" # Constant Returns to Scale
+                    if abs(dual_sum_lambda_constraint) < 1e-6: 
+                        rts_label = "CRS" 
                     elif dual_sum_lambda_constraint < 0:
-                        # Para input-oriented: dual negativo implica IRS (Increasing Returns to Scale)
-                        # Para output-oriented: dual negativo implica DRS (Decreasing Returns to Scale)
                         rts_label = "IRS" if orientation == "input" else "DRS"
-                    else: # dual_sum_lambda_constraint > 0
-                        # Para input-oriented: dual positivo implica DRS (Decreasing Returns to Scale)
-                        # Para output-oriented: dual positivo implica IRS (Increasing Returns to Scale)
+                    else: 
                         rts_label = "DRS" if orientation == "input" else "IRS"
                 else:
                     rts_label = "Dual N/A"
             else:
-                rts_label = "Constraints N/A" # No constraints found
+                rts_label = "Constraints N/A" 
 
         # 10) Guardar registro
         registros[i] = {
@@ -556,7 +466,7 @@ def run_bcc(
             "model": "BCC",
             "orientation": orientation,
             "super_eff": bool(super_eff),
-            "lambda_vector": lambdas_vals, # Ya mapeado con dmus_ref
+            "lambda_vector": lambdas_vals, 
             "slacks_inputs": slacks_input,
             "slacks_outputs": slacks_output,
             "scale_efficiency": np.round(scale_eff, 6) if scale_eff is not None else np.nan,
