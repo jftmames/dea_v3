@@ -138,15 +138,7 @@ if 'df' in st.session_state and st.session_state.df is not None:
         if not st.session_state.input_cols or not st.session_state.output_cols:
             st.error("Por favor, selecciona al menos un input y un output.")
         else:
-            with st.spinner("Validando datos y realizando análisis..."):
-                validation_results = validate(df, st.session_state.input_cols, st.session_state.output_cols)
-                formal_issues = validation_results.get("formal_issues", [])
-                if formal_issues:
-                    st.error("Se encontraron problemas graves en los datos. Por favor, corrígelos:")
-                    for issue in formal_issues:
-                        st.write(f"- {issue}")
-                    st.stop()
-                
+            with st.spinner("Realizando análisis completo..."):
                 st.session_state.dea_results = run_dea_analysis(df, st.session_state.dmu_col, st.session_state.input_cols, st.session_state.output_cols)
                 context = {"inputs": st.session_state.input_cols, "outputs": st.session_state.output_cols}
                 df_hash = pd.util.hash_pandas_object(df).sum()
@@ -188,44 +180,48 @@ if st.session_state.get('app_status') == "results_ready" and st.session_state.ge
 
     if st.session_state.get('inquiry_tree'):
         st.header("Análisis Deliberativo Asistido por IA", divider='rainbow')
+        
+        # --- SECCIÓN DE ESCENARIOS INTERACTIVOS MEJORADA ---
         st.subheader("🔬 Escenarios Interactivos del Complejo de Indagación")
-        st.info("La IA ha generado las siguientes hipótesis sobre las causas de la ineficiencia. Haz clic en un botón para probar un escenario y luego pulsa 'Ejecutar Análisis DEA' de nuevo para ver el impacto.")
+        st.info("La IA ha generado las siguientes hipótesis. Cada una propone una acción para probar un escenario alternativo. Pulsa un botón para pre-seleccionar un escenario y luego haz clic en 'Ejecutar Análisis DEA' para ver los resultados.")
         
         main_hypotheses = list(st.session_state.inquiry_tree.get(list(st.session_state.inquiry_tree.keys())[0], {}).keys())
         
         for i, hypothesis in enumerate(main_hypotheses):
-            st.markdown(f"**Recomendación de la IA:** *{hypothesis}*")
-            
-            new_inputs = st.session_state.input_cols.copy()
-            new_outputs = st.session_state.output_cols.copy()
-            can_apply = False
-            help_text = "Este escenario no es aplicable con la selección actual."
+            with st.container(border=True):
+                st.markdown(f"##### Hipótesis de la IA: *«{hypothesis}»*")
+                
+                new_inputs = st.session_state.input_cols.copy()
+                new_outputs = st.session_state.output_cols.copy()
+                can_apply = False
+                action_text = "No se puede aplicar con la selección actual (se requiere más de 1 input/output)."
 
-            if "input" in hypothesis.lower() and len(new_inputs) > 1:
-                removed_var = new_inputs.pop(0)
-                can_apply = True
-                help_text = f"Prueba el análisis sin el input: '{removed_var}'"
-            elif "output" in hypothesis.lower() and len(new_outputs) > 1:
-                removed_var = new_outputs.pop(0)
-                can_apply = True
-                help_text = f"Prueba el análisis sin el output: '{removed_var}'"
-            
-            st.button(
-                "Probar este escenario",
-                key=f"hyp_{i}",
-                on_click=apply_scenario,
-                args=(new_inputs, new_outputs),
-                disabled=not can_apply,
-                help=help_text
-            )
-            st.divider()
-
+                if "input" in hypothesis.lower() and len(new_inputs) > 1:
+                    removed_var = new_inputs.pop(0)
+                    can_apply = True
+                    action_text = f"Probar el análisis **eliminando el input:** `{removed_var}`"
+                elif "output" in hypothesis.lower() and len(new_outputs) > 1:
+                    removed_var = new_outputs.pop(0)
+                    can_apply = True
+                    action_text = f"Probar el análisis **eliminando el output:** `{removed_var}`"
+                
+                st.write(f"**Acción Sugerida:** {action_text}")
+                
+                st.button(
+                    "Aplicar este escenario",
+                    key=f"hyp_{i}",
+                    on_click=apply_scenario,
+                    args=(new_inputs, new_outputs),
+                    disabled=not can_apply,
+                    use_container_width=True
+                )
+        
         st.subheader("🧠 Métrica de Calidad del Diagnóstico (EEE)")
         eee = st.session_state.get('eee_metrics')
         if eee:
             st.metric(label="Puntuación EEE Total", value=f"{eee.get('score', 0):.4f}")
             with st.expander("Ver desglose y significado de la Métrica EEE"):
-                st.markdown("""El **Índice de Equilibrio Erotético (EEE)** mide la calidad y robustez del árbol de diagnóstico. Una puntuación alta indica un análisis más completo.""")
+                st.markdown("""El **Índice de Equilibrio Erotético (EEE)** mide la calidad del árbol de diagnóstico. Una puntuación alta indica un análisis más completo.""")
                 st.markdown("**D1: Profundidad del Análisis**")
                 st.progress(eee.get('D1', 0), text=f"Puntuación: {eee.get('D1', 0):.2f}")
                 st.markdown("**D2: Pluralidad Semántica (Variedad de hipótesis)**")
@@ -235,6 +231,7 @@ if st.session_state.get('app_status') == "results_ready" and st.session_state.ge
 
     st.header("Acciones", divider='rainbow')
     notes = st.text_area("Notas de la sesión")
+    
     if st.button("💾 Guardar Sesión", use_container_width=True):
         st.success("¡Sesión guardada! (Funcionalidad en desarrollo)")
         st.balloons()
