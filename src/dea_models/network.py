@@ -216,4 +216,4 @@ def run_multi_stage_network(
         fila["eff_overall"] = overall
         resultados.append(fila)
 
-    return pd.DataFrame(resultados)  
+    return pd.DataFrame(resultados)
