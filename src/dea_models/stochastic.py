@@ -1,9 +1,10 @@
 # src/dea_models/stochastic.py
+
 import numpy as np
 import pandas as pd
 
-from src.dea_models.radial import run_ccr # Corregido a importación absoluta
-from src.dea_models.utils import validate_dataframe # Corregido a importación absoluta
+from .radial import run_ccr
+from .utils import validate_dataframe
 
 def run_stochastic_dea(
     df: pd.DataFrame,
