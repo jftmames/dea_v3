@@ -274,153 +274,121 @@ def run_ccr(
 
 
 # ------------------------------------------------------------------
-# 4. Función pública: run_bcc (VERSIÓN OPTIMIZADA Y CORREGIDA)
+# 4. Función pública: run_bcc (VERSIÓN OPTIMIZADA Y ROBUSTA)
 # ------------------------------------------------------------------
 def run_bcc(
     df: pd.DataFrame,
     dmu_column: str,
     input_cols: list[str],
     output_cols: list[str],
-    df_ccr_results: pd.DataFrame, # <--- PARÁMETRO AÑADIDO
+    df_ccr_results: pd.DataFrame,
     orientation: str = "input",
     super_eff: bool = False,
 ) -> pd.DataFrame:
     """
-    Ejecuta modelo BCC (VRS) con orientación 'input' u 'output'.
-    Ahora recibe un DataFrame con los resultados de CCR para evitar recálculos.
-    Devuelve DataFrame con columnas:
-      DMU, efficiency, model, orientation, super_eff, lambda_vector, slacks_inputs, slacks_outputs, scale_efficiency, rts_label
+    Ejecuta modelo BCC (VRS). Esta versión es robusta y maneja errores
+    del optimizador para DMUs individuales sin detener la ejecución.
     """
-    # 1) Validar que exista la columna DMU
     if dmu_column not in df.columns:
         raise ValueError(f"La columna DMU '{dmu_column}' no existe en el DataFrame.")
 
-    # 2) Validar que los inputs/outputs sean numéricos y > 0
     from .utils import validate_dataframe
     validate_dataframe(df, input_cols, output_cols, allow_zero=False, allow_negative=False)
 
-    # 3) Preparar X (inputs) y Y (outputs)
     df_num = df[[dmu_column] + input_cols + output_cols].copy()
-    X = df_num[input_cols].to_numpy().T    # tamaño m×n
-    Y = df_num[output_cols].to_numpy().T  # tamaño s×n
+    X = df_num[input_cols].to_numpy().T
+    Y = df_num[output_cols].to_numpy().T
     dmus = df_num[dmu_column].astype(str).tolist()
-    m, n = X.shape    # m = #inputs, n = #DMUs
-    s, _ = Y.shape    # s = #outputs
+    m, n = X.shape
+    s, _ = Y.shape
+    
+    registros = [None] * n
 
-    # 4) Vector para almacenar eficiencias; lista para registros
-    eff = np.zeros(n)
-    registros: list[dict] = [None] * n
-
-    # 5) Iterar sobre cada DMU i
     for i in range(n):
-        # 5.1) Construir referencial X_ref, Y_ref excluyendo DMU i si super_eff=True
-        if super_eff:
-            mask = np.ones(n, dtype=bool)
-            mask[i] = False
-            X_ref = X[:, mask]
-            Y_ref = Y[:, mask]
-            dmus_ref = [dmus[j] for j in range(n) if j != i]
-            num_vars = n - 1
-        else:
-            X_ref = X
-            Y_ref = Y
-            dmus_ref = dmus
-            num_vars = n
+        try:
+            if super_eff:
+                mask = np.ones(n, dtype=bool)
+                mask[i] = False
+                X_ref, Y_ref = X[:, mask], Y[:, mask]
+                dmus_ref = [dmus[j] for j in range(n) if j != i]
+                num_vars = n - 1
+            else:
+                X_ref, Y_ref = X, Y
+                dmus_ref = dmus
+                num_vars = n
 
-        if num_vars == 0:
+            if num_vars == 0:
+                raise ValueError("No reference DMUs to compare against.")
+
+            lambdas_var = cp.Variable((num_vars, 1), nonneg=True)
+            slacks_in = cp.Variable((m, 1), nonneg=True)
+            slacks_out = cp.Variable((s, 1), nonneg=True)
+            x_i, y_i = X[:, [i]], Y[:, [i]]
+
+            convexity_constraint = cp.sum(lambdas_var) == 1
+            constraints = [convexity_constraint]
+
+            if orientation == "input":
+                theta = cp.Variable()
+                constraints.extend([
+                    Y_ref @ lambdas_var + slacks_out >= y_i,
+                    X_ref @ lambdas_var <= theta * x_i - slacks_in,
+                ])
+                objective = cp.Minimize(theta)
+            else: # output
+                phi = cp.Variable()
+                constraints.extend([
+                    Y_ref @ lambdas_var >= phi * y_i + slacks_out, 
+                    X_ref @ lambdas_var + slacks_in <= x_i,
+                ])
+                objective = cp.Maximize(phi)
+
+            prob = cp.Problem(objective, constraints)
+            prob.solve(solver=cp.ECOS, abstol=1e-6, reltol=1e-6, feastol=1e-8, verbose=False)
+
+            if prob.status not in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE]:
+                raise ValueError(f"Solver status was {prob.status}, not optimal.")
+            
+            value = theta.value if orientation == 'input' else phi.value
+            current_eff_val = float(value) if value is not None else np.nan
+
+            slack_in_arr = slacks_in.value if slacks_in.value is not None else np.zeros((m, 1))
+            slack_out_arr = slacks_out.value if slacks_out.value is not None else np.zeros((s, 1))
+            slacks_input = {input_cols[k]: float(v) for k, v in enumerate(slack_in_arr)}
+            slacks_output = {output_cols[r]: float(v) for r, v in enumerate(slack_out_arr)}
+
+            ccr_eff_series = df_ccr_results.loc[df_ccr_results[dmu_column] == dmus[i], "tec_efficiency_ccr"]
+            ccr_eff = ccr_eff_series.iloc[0] if not ccr_eff_series.empty else np.nan
+            scale_eff = (ccr_eff / current_eff_val) if not np.isnan(current_eff_val) and not np.isnan(ccr_eff) and current_eff_val != 0 else np.nan
+            
+            lambdas_vals = {ref_dmu_id: float(v) for ref_dmu_id, v in zip(dmus_ref, lambdas_var.value)} if lambdas_var.value is not None else {}
+            
+            rts_label = "VRS"
+            dual_val = convexity_constraint.dual_value
+            if dual_val is not None:
+                dual_val = float(dual_val)
+                if abs(dual_val) < 1e-6: rts_label = "CRS"
+                elif dual_val < 0: rts_label = "IRS" if orientation == "input" else "DRS"
+                else: rts_label = "DRS" if orientation == "input" else "IRS"
+
             registros[i] = {
-                dmu_column: dmus[i], "efficiency": 1.0, "model": "BCC",
-                "orientation": orientation, "super_eff": bool(super_eff),
-                "lambda_vector": {dmus[i]: 1.0}, "slacks_inputs": {col: 0.0 for col in input_cols},
-                "slacks_outputs": {col: 0.0 for col in output_cols},
-                "scale_efficiency": 1.0, "rts_label": "VRS" 
+                dmu_column: dmus[i],
+                "efficiency": np.round(current_eff_val, 6) if not np.isnan(current_eff_val) else np.nan,
+                "model": "BCC", "orientation": orientation, "super_eff": bool(super_eff),
+                "lambda_vector": lambdas_vals, "slacks_inputs": slacks_input, "slacks_outputs": slacks_output,
+                "scale_efficiency": np.round(scale_eff, 6) if not np.isnan(scale_eff) else np.nan,
+                "rts_label": rts_label
             }
-            continue 
 
-        # 5.2) Definir variables de decisión
-        lambdas_var = cp.Variable((num_vars, 1), nonneg=True)
-        slacks_in = cp.Variable((m, 1), nonneg=True)
-        slacks_out = cp.Variable((s, 1), nonneg=True)
-        theta, phi = None, None
-        x_i, y_i = X[:, [i]], Y[:, [i]]    
-
-        # 5.3) Construir problema según orientación
-        # --- INICIO DE LA CORRECCIÓN #2 ---
-        convexity_constraint = cp.sum(lambdas_var) == 1
-        constraints: list = [convexity_constraint]
-        # --- FIN DE LA CORRECCIÓN #2 ---
-        
-        if orientation == "input":
-            theta = cp.Variable()
-            constraints += [
-                Y_ref @ lambdas_var + slacks_out >= y_i,
-                X_ref @ lambdas_var <= theta * x_i - slacks_in,
-            ]
-            objective = cp.Minimize(theta)
-        else: # output
-            phi = cp.Variable()
-            constraints += [
-                Y_ref @ lambdas_var >= phi * y_i + slacks_out, 
-                X_ref @ lambdas_var + slacks_in <= x_i,
-            ]
-            objective = cp.Maximize(phi)
-
-        # 5.4) Resolver
-        prob = cp.Problem(objective, constraints)
-        prob.solve(solver=cp.ECOS, abstol=1e-6, reltol=1e-6, feastol=1e-8, verbose=False)
-
-        # 6) Extraer eficiencia
-        current_eff_val = np.nan
-        if prob.status in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE]:
-            value = theta.value if orientation == "input" else phi.value
-            if value is not None:
-                current_eff_val = float(value)
-        eff[i] = current_eff_val 
-
-        # 7) Extraer slacks
-        slack_in_arr = slacks_in.value if slacks_in.value is not None else np.zeros((m, 1))
-        slack_out_arr = slacks_out.value if slacks_out.value is not None else np.zeros((s, 1))
-        slack_in_arr[slack_in_arr < 1e-9] = 0
-        slack_out_arr[slack_out_arr < 1e-9] = 0
-        slacks_input = { input_cols[k]: float(slack_in_arr[k, 0]) for k in range(m) }
-        slacks_output = { output_cols[r]: float(slack_out_arr[r, 0]) for r in range(s) }
-        
-        # 8) ¡OPTIMIZADO! Calcular "scale efficiency" buscando en df_ccr_results
-        ccr_eff_series = df_ccr_results.loc[df_ccr_results[dmu_column] == dmus[i], "tec_efficiency_ccr"]
-        ccr_eff = ccr_eff_series.iloc[0] if not ccr_eff_series.empty else np.nan
-        
-        scale_eff = np.nan
-        if not np.isnan(current_eff_val) and not np.isnan(ccr_eff) and current_eff_val != 0:
-            scale_eff = ccr_eff / current_eff_val
-        
-        lambdas_vals = {}
-        if lambdas_var.value is not None:
-            for idx, ref_dmu_id in enumerate(dmus_ref): 
-                lambdas_vals[ref_dmu_id] = float(lambdas_var.value[idx,0])
-        
-        # 9) Determinación de RTS
-        rts_label = "VRS"
-        if prob.status in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE]:
-            # --- INICIO DE LA CORRECCIÓN #2 ---
-            dual_sum_lambda = convexity_constraint.dual_value
-            # --- FIN DE LA CORRECCIÓN #2 ---
-            if dual_sum_lambda is not None:
-                dual_val = float(dual_sum_lambda)
-                if abs(dual_val) < 1e-6:
-                    rts_label = "CRS"
-                elif dual_val < 0:
-                    rts_label = "IRS" if orientation == "input" else "DRS"
-                else:
-                    rts_label = "DRS" if orientation == "input" else "IRS"
-        
-        # 10) Guardar registro
-        registros[i] = {
-            dmu_column: dmus[i],
-            "efficiency": np.round(current_eff_val, 6) if not np.isnan(current_eff_val) else np.nan,
-            "model": "BCC", "orientation": orientation, "super_eff": bool(super_eff),
-            "lambda_vector": lambdas_vals, "slacks_inputs": slacks_input, "slacks_outputs": slacks_output,
-            "scale_efficiency": np.round(scale_eff, 6) if not np.isnan(scale_eff) else np.nan,
-            "rts_label": rts_label
-        }
+        except Exception as e:
+            # Si algo falla para esta DMU, crea un registro de error y continúa.
+            registros[i] = {
+                dmu_column: dmus[i], "efficiency": np.nan, "model": "BCC",
+                "orientation": orientation, "super_eff": bool(super_eff),
+                "lambda_vector": {}, "slacks_inputs": {col: np.nan for col in input_cols},
+                "slacks_outputs": {col: np.nan for col in output_cols},
+                "scale_efficiency": np.nan, "rts_label": f"Error: {type(e).__name__}"
+            }
+            continue
 
     return pd.DataFrame(registros)
