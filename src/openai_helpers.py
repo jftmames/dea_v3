@@ -1,6 +1,7 @@
 # jftmames/-dea-deliberativo-mvp/-dea-deliberativo-mvp-b44b8238c978ae0314af30717b9399634d28f8f9/src/openai_helpers.py
 import os
 import json
+import pandas as pd  # <-- SE AÑADIÓ ESTA LÍNEA
 from openai import OpenAI
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
