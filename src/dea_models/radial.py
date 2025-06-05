@@ -255,11 +255,12 @@ def run_ccr(
 
         lambdas_vals = {}
         if lambdas_opt is not None:
+            # Aplanar para iterar sobre valores escalares
             for idx, ref_idx in enumerate(ref_dmus_indices):
-                lambdas_vals[dmus[ref_idx]] = float(lambdas_opt[idx, 0])
+                lambdas_vals[dmus[ref_idx]] = float(lambdas_opt.flatten()[idx])
             
-        slacks_input_dict = {input_cols[k]: float(slacks_input_values[k,0]) for k in range(m)}
-        slacks_output_dict = {output_cols[r]: float(slacks_output_values[r,0]) for r in range(s)}
+        slacks_input_dict = {input_cols[k]: float(v) for k, v in enumerate(slacks_input_values.flatten())}
+        slacks_output_dict = {output_cols[r]: float(v) for r, v in enumerate(slacks_output_values.flatten())}
 
         resultados.append({
             dmu_column: dmus[i],
@@ -267,14 +268,14 @@ def run_ccr(
             "lambda_vector": lambdas_vals,
             "slacks_inputs": slacks_input_dict,
             "slacks_outputs": slacks_output_dict,
-            "rts_label": "CRS"  # CCR siempre CRS
+            "rts_label": "CRS"
         })
 
     return pd.DataFrame(resultados)
 
 
 # ------------------------------------------------------------------
-# 4. Función pública: run_bcc (VERSIÓN OPTIMIZADA Y ROBUSTA)
+# 4. Función pública: run_bcc (VERSIÓN FINAL Y ROBUSTA)
 # ------------------------------------------------------------------
 def run_bcc(
     df: pd.DataFrame,
@@ -327,21 +328,21 @@ def run_bcc(
 
             convexity_constraint = cp.sum(lambdas_var) == 1
             constraints = [convexity_constraint]
+            
+            objective_var = cp.Variable()
 
             if orientation == "input":
-                theta = cp.Variable()
                 constraints.extend([
-                    Y_ref @ lambdas_var + slacks_out >= y_i,
-                    X_ref @ lambdas_var <= theta * x_i - slacks_in,
+                    Y_ref @ lambdas_var >= y_i + slacks_out,
+                    X_ref @ lambdas_var + slacks_in == objective_var * x_i,
                 ])
-                objective = cp.Minimize(theta)
+                objective = cp.Minimize(objective_var)
             else: # output
-                phi = cp.Variable()
                 constraints.extend([
-                    Y_ref @ lambdas_var >= phi * y_i + slacks_out, 
-                    X_ref @ lambdas_var + slacks_in <= x_i,
+                    Y_ref @ lambdas_var - slacks_out == objective_var * y_i, 
+                    X_ref @ lambdas_var + slacks_in == x_i,
                 ])
-                objective = cp.Maximize(phi)
+                objective = cp.Maximize(objective_var)
 
             prob = cp.Problem(objective, constraints)
             prob.solve(solver=cp.ECOS, abstol=1e-6, reltol=1e-6, feastol=1e-8, verbose=False)
@@ -349,19 +350,21 @@ def run_bcc(
             if prob.status not in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE]:
                 raise ValueError(f"Solver status was {prob.status}, not optimal.")
             
-            value = theta.value if orientation == 'input' else phi.value
-            current_eff_val = float(value) if value is not None else np.nan
+            current_eff_val = float(objective_var.value) if objective_var.value is not None else np.nan
 
+            # --- INICIO DE LA CORRECCIÓN FINAL ---
             slack_in_arr = slacks_in.value if slacks_in.value is not None else np.zeros((m, 1))
             slack_out_arr = slacks_out.value if slacks_out.value is not None else np.zeros((s, 1))
-            slacks_input = {input_cols[k]: float(v) for k, v in enumerate(slack_in_arr)}
-            slacks_output = {output_cols[r]: float(v) for r, v in enumerate(slack_out_arr)}
+            slacks_input = {input_cols[k]: float(v) for k, v in enumerate(slack_in_arr.flatten())}
+            slacks_output = {output_cols[r]: float(v) for r, v in enumerate(slack_out_arr.flatten())}
+
+            lambdas_flat = lambdas_var.value.flatten() if lambdas_var.value is not None else []
+            lambdas_vals = {ref_dmu_id: float(v) for ref_dmu_id, v in zip(dmus_ref, lambdas_flat)}
+            # --- FIN DE LA CORRECCIÓN FINAL ---
 
             ccr_eff_series = df_ccr_results.loc[df_ccr_results[dmu_column] == dmus[i], "tec_efficiency_ccr"]
             ccr_eff = ccr_eff_series.iloc[0] if not ccr_eff_series.empty else np.nan
             scale_eff = (ccr_eff / current_eff_val) if not np.isnan(current_eff_val) and not np.isnan(ccr_eff) and current_eff_val != 0 else np.nan
-            
-            lambdas_vals = {ref_dmu_id: float(v) for ref_dmu_id, v in zip(dmus_ref, lambdas_var.value)} if lambdas_var.value is not None else {}
             
             rts_label = "VRS"
             dual_val = convexity_constraint.dual_value
@@ -381,13 +384,12 @@ def run_bcc(
             }
 
         except Exception as e:
-            # Si algo falla para esta DMU, crea un registro de error y continúa.
             registros[i] = {
                 dmu_column: dmus[i], "efficiency": np.nan, "model": "BCC",
                 "orientation": orientation, "super_eff": bool(super_eff),
                 "lambda_vector": {}, "slacks_inputs": {col: np.nan for col in input_cols},
                 "slacks_outputs": {col: np.nan for col in output_cols},
-                "scale_efficiency": np.nan, "rts_label": f"Error: {type(e).__name__}"
+                "scale_efficiency": np.nan, "rts_label": f"Error"
             }
             continue
 
