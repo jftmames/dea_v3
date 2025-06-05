@@ -58,16 +58,15 @@ def run_dea_analysis(_df, dmu_col, input_cols, output_cols):
 @st.cache_data
 def get_inquiry_and_eee(_root_q, _context, _df_hash):
     """Encapsula las llamadas al LLM y EEE para ser cacheados."""
-    # Comprueba si la API key de OpenAI está disponible
     if not os.getenv("OPENAI_API_KEY"):
-        return None, 0.0 # Retorna None si la key no existe
+        return None, 0.0
     inquiry_tree = generate_inquiry(_root_q, context=_context)
     eee_score = compute_eee(inquiry_tree, depth_limit=5, breadth_limit=5)
     return inquiry_tree, eee_score
 
 def load_full_session(session_data):
     """Carga de forma segura el estado COMPLETO de una sesión."""
-    initialize_state() # Resetea para un estado limpio antes de cargar
+    initialize_state()
     st.session_state.df = pd.DataFrame(session_data.get('df_data', []))
     st.session_state.dmu_col = session_data.get('dmu_col')
     st.session_state.input_cols = session_data.get('input_cols', [])
@@ -101,19 +100,6 @@ with st.sidebar:
             session_to_load = next((s for s in sessions if s['session_id'] == session_id_to_load), None)
             if session_to_load:
                 load_full_session(session_to_load)
-    
-    st.divider()
-    st.header("Configuración Avanzada")
-    st.info("""
-        Para activar el **Análisis Deliberativo** (Árbol de Indagación y Métrica EEE),
-        necesitas añadir tu API Key de OpenAI.
-        
-        1. Ve a la configuración de tu app en Streamlit Cloud.
-        2. En la sección 'Secrets', añade un nuevo secret con el nombre `OPENAI_API_KEY`.
-        3. Pega tu clave de OpenAI como valor.
-        4. Guarda y reinicia la aplicación.
-    """)
-
 
 # -------------------------------------------------------
 # 5) Área principal
@@ -188,30 +174,41 @@ if st.session_state.get('app_status') == "results_ready" and st.session_state.ge
     
     st.header("Resultados del Análisis DEA", divider='rainbow')
 
-    st.subheader("📊 Tabla de Eficiencias (CCR)")
-    st.dataframe(results["df_ccr"])
+    tab_ccr, tab_bcc = st.tabs(["**Análisis CCR**", "**Análisis BCC**"])
 
-    # --- SECCIÓN DE GRÁFICOS DEA ---
-    st.subheader("Visualizaciones de Eficiencia")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.plotly_chart(results['hist_ccr'], use_container_width=True)
-    with col2:
-        # Asumiendo que scatter3d_ccr está en los resultados
-        if 'scatter3d_ccr' in results:
-            st.plotly_chart(results['scatter3d_ccr'], use_container_width=True)
+    with tab_ccr:
+        st.subheader("📊 Tabla de Eficiencias (CCR)")
+        st.dataframe(results["df_ccr"])
 
-    st.subheader("🕷️ Benchmark Spider CCR")
-    dmu_options = results["df_ccr"][st.session_state.dmu_col].astype(str).tolist()
-    
-    selected_dmu_index = dmu_options.index(st.session_state.selected_dmu) if st.session_state.get('selected_dmu') in dmu_options else 0
-    st.selectbox("Seleccionar DMU para comparar:", options=dmu_options, index=selected_dmu_index, key="selected_dmu")
-    
-    if st.session_state.selected_dmu:
-        spider_fig = plot_benchmark_spider(results["merged_ccr"], st.session_state.selected_dmu, st.session_state.input_cols, st.session_state.output_cols)
-        st.plotly_chart(spider_fig, use_container_width=True)
+        st.subheader("Visualizaciones de Eficiencia (CCR)")
+        col1, col2 = st.columns(2)
+        with col1:
+            if 'hist_ccr' in results:
+                st.plotly_chart(results['hist_ccr'], use_container_width=True)
+        with col2:
+            if 'scatter3d_ccr' in results:
+                st.plotly_chart(results['scatter3d_ccr'], use_container_width=True)
+        
+        st.subheader("🕷️ Benchmark Spider (CCR)")
+        dmu_options_ccr = results["df_ccr"][st.session_state.dmu_col].astype(str).tolist()
+        selected_dmu_ccr = st.selectbox("Seleccionar DMU para comparar (CCR):", options=dmu_options_ccr, key="dmu_ccr")
+        
+        if selected_dmu_ccr:
+            spider_fig_ccr = plot_benchmark_spider(results["merged_ccr"], selected_dmu_ccr, st.session_state.input_cols, st.session_state.output_cols)
+            st.plotly_chart(spider_fig_ccr, use_container_width=True)
 
-    # --- SECCIÓN DE ANÁLISIS DELIBERATIVO ---
+    with tab_bcc:
+        st.subheader("📊 Tabla de Eficiencias (BCC)")
+        st.dataframe(results["df_bcc"])
+
+        st.subheader("Visualizaciones de Eficiencia (BCC)")
+        if 'hist_bcc' in results:
+            st.plotly_chart(results['hist_bcc'], use_container_width=True)
+
+        st.subheader("🕷️ Benchmark Spider (BCC)")
+        st.info("El gráfico de araña para BCC no está implementado en esta versión, ya que el benchmarking se realiza típicamente contra la frontera CCR (eficiencia técnica pura).")
+
+    # --- SECCIÓN DE ANÁLISIS DELIBERATIVO (común a ambos modelos) ---
     if st.session_state.get('inquiry_tree'):
         st.header("Análisis Deliberativo Asistido por IA", divider='rainbow')
         st.subheader("🌳 Complejo de Indagación (Árbol de Diagnóstico)")
@@ -220,7 +217,8 @@ if st.session_state.get('app_status') == "results_ready" and st.session_state.ge
 
         st.subheader("🧠 Métrica de Calidad del Diagnóstico (EEE)")
         st.info("El **Índice de Equilibrio Erotético (EEE)** mide la calidad y robustez del árbol de diagnóstico (0 a 1).")
-        st.metric(label="Puntuación EEE", value=f"{st.session_state.eee_score:.4f}")
+        if st.session_state.get('eee_score') is not None:
+            st.metric(label="Puntuación EEE", value=f"{st.session_state.eee_score:.4f}")
 
     # --- SECCIÓN DE ACCIONES ---
     st.header("Acciones", divider='rainbow')
