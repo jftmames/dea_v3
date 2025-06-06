@@ -1,12 +1,16 @@
 import os
 import json
+import pandas as pd
 from openai import OpenAI
+import streamlit as st
 
 def explain_inquiry_tree(tree: dict) -> dict:
     """Usa un LLM para generar una explicación en lenguaje natural de un árbol de indagación."""
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
-        return {"error": "API Key de OpenAI no encontrada.", "text": "Error: La clave de API de OpenAI no está configurada en los 'Secrets' de la aplicación."}
+        # Devuelve un error claro en lugar de fallar
+        error_msg = "Error: La clave de API de OpenAI no está configurada para explicar el árbol de razonamiento."
+        return {"error": error_msg, "text": error_msg}
     
     client = OpenAI(api_key=api_key)
     
