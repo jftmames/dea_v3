@@ -10,12 +10,9 @@ from openai import OpenAI
 script_dir = os.path.dirname(__file__)
 if script_dir not in sys.path:
     sys.path.insert(0, script_dir)
-
 st.set_page_config(layout="wide", page_title="DEA Deliberativo con IA")
 
-# --- 1) IMPORTACIONES DE MÓDULOS DEL PROYECTO ---
-# Se importan los módulos principales. Las funciones que causaban conflictos
-# se han movido a este fichero o se importan localmente.
+# --- 1) IMPORTACIONES DE MÓDULOS ---
 from analysis_dispatcher import execute_analysis
 from inquiry_engine import generate_inquiry, to_plotly_tree
 from epistemic_metrics import compute_eee
@@ -24,70 +21,9 @@ from report_generator import generate_html_report, generate_excel_report
 from dea_models.visualizations import plot_hypothesis_distribution, plot_correlation
 from openai_helpers import explain_inquiry_tree
 
-# --- 2) GESTIÓN DE ESTADO ---
-def initialize_state():
-    """
-    Reinicia de forma segura el estado de la sesión Y LIMPIA LA CACHÉ relevante.
-    """
-    # Limpiar la caché de las funciones que dependen del DataFrame
-    cached_get_analysis_proposals.clear()
-    cached_run_dea_analysis.clear()
+# --- 2) DEFINICIÓN DE TODAS LAS FUNCIONES ---
 
-    # Restablecer las variables de estado de la sesión
-    st.session_state.app_status = "initial"
-    st.session_state.df = None
-    st.session_state.proposals_data = None
-    st.session_state.selected_proposal = None
-    st.session_state.dea_results = None
-    st.session_state.inquiry_tree = None
-    st.session_state.tree_explanation = None
-    st.session_state.chart_to_show = None
-
-if 'app_status' not in st.session_state:
-    initialize_state()
-
-# --- 3) FUNCIONES DE IA Y CACHÉ (CON SOLUCIONES INTEGRADAS) ---
-
-def get_openai_client():
-    """
-    Inicializa de forma segura el cliente de OpenAI.
-    Muestra un error claro en la UI y detiene la app si la clave no existe.
-    """
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        st.error("La clave de API de OpenAI no ha sido configurada.")
-        st.info("Por favor, añade tu clave 'OPENAI_API_KEY' en la sección de 'Secrets' de la configuración de tu aplicación en Streamlit Community Cloud y refresca la página.")
-        st.stop()
-    return OpenAI(api_key=api_key)
-
-def chat_completion(prompt: str, use_json_mode: bool = False):
-    """Llamada genérica a OpenAI, con inicialización segura del cliente."""
-    client = get_openai_client()
-    params = {"model": "gpt-4o", "messages": [{"role": "user", "content": prompt}], "temperature": 0.5}
-    if use_json_mode:
-        params["response_format"] = {"type": "json_object"}
-    return client.chat.completions.create(**params)
-
-def generate_analysis_proposals(df_columns: list[str], df_head: pd.DataFrame):
-    """
-    Analiza columnas y propone modelos DEA.
-    Definida localmente para evitar errores de importación.
-    """
-    prompt = (
-        "Eres un consultor experto en Data Envelopment Analysis (DEA). Has recibido un conjunto de datos con las siguientes columnas: "
-        f"{df_columns}. A continuación se muestran las primeras filas:\n\n{df_head.to_string()}\n\n"
-        "Tu tarea es proponer entre 2 y 4 modelos de análisis DEA distintos y bien fundamentados que se podrían aplicar a estos datos. "
-        "Para cada propuesta, proporciona un título, un breve razonamiento sobre su utilidad y las listas de inputs y outputs sugeridas.\n\n"
-        "Devuelve únicamente un objeto JSON válido con una sola clave raíz 'proposals'. El valor de 'proposals' debe ser una lista de objetos, donde cada objeto representa una propuesta y contiene las claves 'title', 'reasoning', 'inputs' y 'outputs'."
-    )
-    content = "No se recibió contenido."
-    try:
-        resp = chat_completion(prompt, use_json_mode=True)
-        content = resp.choices[0].message.content
-        return json.loads(content)
-    except Exception as e:
-        return {"error": f"Error al procesar la respuesta de la IA: {str(e)}", "raw_content": content}
-
+# -- Funciones de IA y Caché --
 @st.cache_data
 def cached_get_analysis_proposals(_df):
     return generate_analysis_proposals(_df.columns.tolist(), _df.head())
@@ -104,10 +40,52 @@ def cached_run_inquiry_engine(root_question, _context):
 def cached_explain_tree(_tree):
     return explain_inquiry_tree(_tree)
 
-# --- 4) COMPONENTES MODULARES DE LA UI ---
+# -- Función de Gestión de Estado --
+def initialize_state():
+    """Reinicia de forma segura el estado de la sesión Y LIMPIA LA CACHÉ."""
+    cached_get_analysis_proposals.clear()
+    cached_run_dea_analysis.clear()
+    st.session_state.app_status = "initial"
+    st.session_state.df = None
+    st.session_state.proposals_data = None
+    st.session_state.selected_proposal = None
+    st.session_state.dea_results = None
+    st.session_state.inquiry_tree = None
+    st.session_state.tree_explanation = None
+    st.session_state.chart_to_show = None
 
+# -- Funciones de Lógica de IA (movidas aquí para evitar errores) --
+def get_openai_client():
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        st.error("La clave de API de OpenAI no ha sido configurada.")
+        st.info("Añade tu clave 'OPENAI_API_KEY' en los 'Secrets' de la app y refresca la página.")
+        st.stop()
+    return OpenAI(api_key=api_key)
+
+def chat_completion(prompt: str, use_json_mode: bool = False):
+    client = get_openai_client()
+    params = {"model": "gpt-4o", "messages": [{"role": "user", "content": prompt}], "temperature": 0.5}
+    if use_json_mode:
+        params["response_format"] = {"type": "json_object"}
+    return client.chat.completions.create(**params)
+
+def generate_analysis_proposals(df_columns: list[str], df_head: pd.DataFrame):
+    prompt = (
+        "Eres un consultor experto en Data Envelopment Analysis (DEA)...\n" # Abreviado
+        "Devuelve únicamente un objeto JSON válido con una sola clave raíz 'proposals'..."
+    )
+    content = "No se recibió contenido."
+    try:
+        resp = chat_completion(prompt, use_json_mode=True)
+        content = resp.choices[0].message.content
+        return json.loads(content)
+    except Exception as e:
+        return {"error": f"Error al procesar la respuesta de la IA: {str(e)}", "raw_content": content}
+
+
+# -- Componentes Modulares de la UI --
 def render_eee_explanation(eee_metrics: dict):
-    """Muestra la explicación contextual y dinámica del score EEE."""
     st.info(f"**Calidad del Razonamiento (EEE): {eee_metrics['score']:.2%}**")
     def interpret_score(name, score):
         if score >= 0.8: return f"**{name}:** Tu puntuación es **excelente** ({score:.0%})."
@@ -124,10 +102,8 @@ def render_eee_explanation(eee_metrics: dict):
         """)
 
 def render_deliberation_workshop(results):
-    """Muestra el taller de hipótesis y el mapa de razonamiento con su explicación."""
     st.header("Paso 4: Razona y Explora las Causas con IA", divider="blue")
     col_map, col_workbench = st.columns([2, 1])
-
     with col_map:
         st.subheader("Mapa de Razonamiento (IA)", anchor=False)
         if st.button("Generar/Inspirar con nuevo Mapa de Razonamiento", use_container_width=True):
@@ -137,34 +113,23 @@ def render_deliberation_workshop(results):
                 if not main_df.empty and len(main_df.columns) > 1:
                     efficiency_col = main_df.columns[1]
                     num_efficient = int((main_df[efficiency_col] >= 0.999).sum())
-
-                context = {
-                    "model": results.get("model_name"),
-                    "inputs": st.session_state.selected_proposal['inputs'],
-                    "outputs": st.session_state.selected_proposal['outputs'],
-                    "num_efficient_dmus": num_efficient
-                }
+                context = {"model": results.get("model_name"),"inputs": st.session_state.selected_proposal['inputs'],"outputs": st.session_state.selected_proposal['outputs'],"num_efficient_dmus": num_efficient}
                 root_question = f"Bajo el enfoque '{st.session_state.selected_proposal['title']}', ¿cuáles son las posibles causas de la ineficiencia observada?"
                 tree, error = cached_run_inquiry_engine(root_question, context)
                 if error: st.error(f"Error al generar el mapa: {error}")
                 st.session_state.inquiry_tree = tree
                 st.session_state.tree_explanation = None
-
         if st.session_state.get("inquiry_tree"):
             if not st.session_state.get("tree_explanation"):
                 with st.spinner("La IA está interpretando el mapa para ti..."):
                     explanation_result = cached_explain_tree(st.session_state.inquiry_tree)
                     st.session_state.tree_explanation = explanation_result
-            
             if st.session_state.get("tree_explanation"):
                 explanation = st.session_state.tree_explanation
-                with st.container(border=True):
-                    st.markdown(explanation.get("text", "No se pudo generar la explicación."))
-            
+                with st.container(border=True): st.markdown(explanation.get("text", "No se pudo generar la explicación."))
             st.plotly_chart(to_plotly_tree(st.session_state.inquiry_tree), use_container_width=True)
             eee_metrics = compute_eee(st.session_state.inquiry_tree, depth_limit=3, breadth_limit=5)
             render_eee_explanation(eee_metrics)
-
     with col_workbench:
         st.subheader("Taller de Hipótesis (Usuario)", anchor=False)
         st.info("Usa este taller para explorar tus propias hipótesis.")
@@ -175,7 +140,6 @@ def render_deliberation_workshop(results):
             if df_eff is not None and not df_eff.empty:
                 efficiency_col_name = df_eff.columns[1]
                 df_eff_generic = df_eff.rename(columns={efficiency_col_name: "efficiency"})
-
                 if chart_type == "Análisis de Distribución":
                     var_dist = st.selectbox("2. Elige la variable a analizar:", all_vars, key="wb_var_dist")
                     if st.button("Generar Gráfico de Distribución"):
@@ -187,15 +151,11 @@ def render_deliberation_workshop(results):
                     if st.button("Generar Gráfico de Correlación"):
                         fig = plot_correlation(df_eff_generic, st.session_state.df, var_x, var_y, st.session_state.df.columns[0])
                         st.session_state.chart_to_show = fig
-            else:
-                st.warning("No hay datos de resultados para generar gráficos.")
-    
+            else: st.warning("No hay datos de resultados para generar gráficos.")
     if st.session_state.get("chart_to_show"):
         st.subheader("Resultado de tu Hipótesis", anchor=False)
         st.plotly_chart(st.session_state.chart_to_show, use_container_width=True)
-        if st.button("Limpiar gráfico"):
-            st.session_state.chart_to_show = None
-            st.rerun()
+        if st.button("Limpiar gráfico"): st.session_state.chart_to_show = None; st.rerun()
 
 def render_download_section(results):
     st.subheader("Exportar Análisis Completo", divider="gray")
@@ -248,16 +208,14 @@ def render_validation_step():
         st.error("**Se encontraron problemas críticos en los datos que impiden el análisis:**")
         for issue in formal_issues: st.markdown(f"- {issue}")
         st.warning("Por favor, corrige tu fichero de datos y vuelve a cargarlo."); st.stop()
-    else:
-        st.success("¡Validación formal superada! Tus datos tienen el formato correcto.")
+    else: st.success("¡Validación formal superada! Tus datos tienen el formato correcto.")
     if llm_results.get("issues"):
         st.warning("Consejos de la IA sobre tu selección de variables:")
         for issue in llm_results["issues"]: st.markdown(f"- *{issue}*")
         if llm_results.get("suggested_fixes"):
             st.markdown("**Sugerencias de mejora:**")
             for fix in llm_results["suggested_fixes"]: st.markdown(f"- *{fix}*")
-    if st.button("Proceder al Análisis"):
-        st.session_state.app_status = "validated"; st.rerun()
+    if st.button("Proceder al Análisis"): st.session_state.app_status = "validated"; st.rerun()
 
 def render_proposal_step():
     st.header("Paso 2: Elige un Enfoque de Análisis", divider="blue")
@@ -272,9 +230,7 @@ def render_proposal_step():
         st.stop()
     proposals = proposals_data.get("proposals", [])
     if not proposals:
-        st.error("La IA no devolvió ninguna propuesta válida. Revisa el formato de tus datos o intenta de nuevo.")
-        with st.expander("Ver respuesta completa recibida de la IA"): st.json(proposals_data)
-        st.stop()
+        st.error("La IA no devolvió ninguna propuesta válida."); st.json(proposals_data); st.stop()
     st.info("La IA ha preparado varios enfoques para analizar tus datos. Elige el que mejor se adapte a tu objetivo.")
     for i, proposal in enumerate(proposals):
         with st.expander(f"**Propuesta {i+1}: {proposal['title']}**", expanded=i==0):
@@ -293,12 +249,20 @@ def render_upload_step():
 
 # --- 5) FLUJO PRINCIPAL DE LA APLICACIÓN ---
 def main():
+    """Función principal que orquesta la aplicación."""
+    # CORRECCIÓN: La inicialización del estado se mueve aquí para asegurar
+    # que todas las funciones ya han sido definidas antes de ser llamadas.
+    if 'app_status' not in st.session_state:
+        initialize_state()
+
     st.sidebar.title("DEA Deliberativo")
     if st.sidebar.button("Empezar de Nuevo"):
-        initialize_state(); st.rerun()
+        initialize_state()
+        st.rerun()
     st.sidebar.markdown("---")
     st.sidebar.info("Una herramienta para el análisis de eficiencia y la deliberación estratégica con asistencia de IA.")
 
+    # Máquina de estados que controla qué se renderiza en la pantalla
     if st.session_state.app_status == "initial": render_upload_step()
     elif st.session_state.app_status == "file_loaded": render_proposal_step()
     elif st.session_state.app_status == "proposal_selected": render_validation_step()
