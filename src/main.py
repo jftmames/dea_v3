@@ -220,22 +220,39 @@ def render_validation_step():
         st.session_state.app_status = "validated"; st.rerun()
 
 def render_proposal_step():
+    """Renderiza la selección de propuestas de análisis."""
     st.header("Paso 2: Elige un Enfoque de Análisis", divider="blue")
+    
     if 'proposals_data' not in st.session_state:
         with st.spinner("La IA está analizando tus datos para sugerir enfoques..."):
             st.session_state.proposals_data = cached_get_analysis_proposals(st.session_state.df)
+    
     proposals_data = st.session_state.proposals_data
+
     if "error" in proposals_data:
         st.error("La IA no pudo generar propuestas debido a un error.")
         with st.expander("Ver detalles del error técnico"):
-            st.code(proposals_data["error"]); st.markdown("**Contenido recibido de la IA (si lo hubo):**"); st.code(proposals_data.get("raw_content", "N/A"))
+            st.code(proposals_data["error"])
+            st.markdown("**Contenido recibido de la IA (si lo hubo):**")
+            st.code(proposals_data.get("raw_content", "N/A"))
         st.stop()
+
     proposals = proposals_data.get("proposals", [])
+    
     if not proposals:
         st.error("La IA no devolvió ninguna propuesta válida. Revisa el formato de tus datos o intenta de nuevo.")
-        with st.expander("Ver respuesta completa recibida de la IA"): st.json(proposals_data)
+        with st.expander("Ver respuesta completa recibida de la IA"):
+            st.json(proposals_data)
         st.stop()
+
     st.info("La IA ha preparado varios enfoques para analizar tus datos. Elige el que mejor se adapte a tu objetivo.")
     for i, proposal in enumerate(proposals):
         with st.expander(f"**Propuesta {i+1}: {proposal['title']}**", expanded=i==0):
-            st.markdown(f"**Razonamiento:** *{proposal['reason
+            # --- Las siguientes 3 líneas son las corregidas ---
+            st.markdown(f"**Razonamiento:** *{proposal['reasoning']}*")
+            st.markdown(f"**Inputs sugeridos:** `{proposal['inputs']}`")
+            st.markdown(f"**Outputs sugeridos:** `{proposal['outputs']}`")
+            if st.button(f"Seleccionar: {proposal['title']}", key=f"select_{i}"):
+                st.session_state.selected_proposal = proposal
+                st.session_state.app_status = "proposal_selected"
+                st.rerun()
