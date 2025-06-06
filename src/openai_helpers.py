@@ -1,14 +1,14 @@
 import os
 import json
-import pandas as pd
 from openai import OpenAI
-
-# Este cliente puede ser local si la función que lo usa es local.
-# O se puede pasar como argumento. Para mantenerlo simple, lo definiremos en main.py también.
 
 def explain_inquiry_tree(tree: dict) -> dict:
     """Usa un LLM para generar una explicación en lenguaje natural de un árbol de indagación."""
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return {"error": "API Key de OpenAI no encontrada.", "text": "Error: La clave de API de OpenAI no está configurada en los 'Secrets' de la aplicación."}
+    
+    client = OpenAI(api_key=api_key)
     
     try:
         tree_str = json.dumps(tree, indent=2, ensure_ascii=False)
@@ -26,8 +26,6 @@ def explain_inquiry_tree(tree: dict) -> dict:
         "Usa un lenguaje claro, directo y orientado a la acción. Utiliza formato Markdown con negritas para resaltar los puntos clave."
     )
     try:
-        # La función chat_completion ahora es local a esta función o se importa de otro sitio.
-        # Por simplicidad, recreamos la llamada aquí.
         resp = client.chat.completions.create(
             model="gpt-4o",
             messages=[{"role": "user", "content": prompt}],
