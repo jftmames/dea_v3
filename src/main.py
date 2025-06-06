@@ -217,27 +217,7 @@ def render_validation_step():
             for fix in llm_results["suggested_fixes"]: st.markdown(f"- *{fix}*")
     if st.button("Proceder al Análisis"): st.session_state.app_status = "validated"; st.rerun()
 
-def render_proposal_step():
-    st.header("Paso 2: Elige un Enfoque de Análisis", divider="blue")
-    if not st.session_state.get('proposals_data'):
-        with st.spinner("La IA está analizando tus datos para sugerir enfoques..."):
-            st.session_state.proposals_data = cached_get_analysis_proposals(st.session_state.df)
-    proposals_data = st.session_state.proposals_data
-    if "error" in proposals_data:
-        st.error("La IA no pudo generar propuestas debido a un error.")
-        with st.expander("Ver detalles del error técnico"):
-            st.code(proposals_data["error"]); st.markdown("**Contenido recibido de la IA (si lo hubo):**"); st.code(proposals_data.get("raw_content", "N/A"))
-        st.stop()
-    proposals = proposals_data.get("proposals", [])
-    if not proposals:
-        st.error("La IA no devolvió ninguna propuesta válida."); st.json(proposals_data); st.stop()
-    st.info("La IA ha preparado varios enfoques para analizar tus datos. Elige el que mejor se adapte a tu objetivo.")
-    for i, proposal in enumerate(proposals):
-        with st.expander(f"**Propuesta {i+1}: {proposal['title']}**", expanded=i==0):
-            st.markdown(f"**Razonamiento:** *{proposal['reasoning']}*"); st.markdown(f"**Inputs sugeridos:** `{proposal['inputs']}`"); st.markdown(f"**Outputs sugeridos:** `{proposal['outputs']}`")
-            if st.button(f"Seleccionar: {proposal['title']}", key=f"select_{i}"):
-                st.session_state.selected_proposal = proposal
-                st.session_state.app_status = "proposal_selected"; st.rerun()
+
 
 def render_upload_step():
     st.header("Paso 1: Carga tus Datos", divider="blue")
@@ -246,7 +226,48 @@ def render_upload_step():
         try: st.session_state.df = pd.read_csv(uploaded_file)
         except Exception: uploaded_file.seek(0); st.session_state.df = pd.read_csv(uploaded_file, sep=';')
         st.session_state.app_status = "file_loaded"; st.rerun()
+def render_proposal_step():
+    """Renderiza la selección de propuestas con manejo de errores y claves opcionales."""
+    st.header("Paso 2: Elige un Enfoque de Análisis", divider="blue")
+    
+    if not st.session_state.get('proposals_data'):
+        with st.spinner("La IA está analizando tus datos para sugerir enfoques..."):
+            st.session_state.proposals_data = cached_get_analysis_proposals(st.session_state.df)
+    
+    proposals_data = st.session_state.proposals_data
+    
+    if "error" in proposals_data:
+        st.error("La IA no pudo generar propuestas debido a un error.")
+        with st.expander("Ver detalles del error técnico"):
+            st.code(proposals_data["error"])
+            st.markdown("**Contenido recibido de la IA (si lo hubo):**")
+            st.code(proposals_data.get("raw_content", "N/A"))
+        st.stop()
+    
+    proposals = proposals_data.get("proposals", [])
+    
+    if not proposals:
+        st.error("La IA no devolvió ninguna propuesta válida. Revisa el formato de tus datos o intenta de nuevo.")
+        with st.expander("Ver respuesta completa recibida de la IA"):
+            st.json(proposals_data)
+        st.stop()
+        
+    st.info("La IA ha preparado varios enfoques para analizar tus datos. Elige el que mejor se adapte a tu objetivo.")
+    for i, proposal in enumerate(proposals):
+        # --- CORRECCIÓN: Usamos .get() para manejar claves que puedan faltar ---
+        title = proposal.get('title', f'Propuesta {i+1} (sin título)')
+        reasoning = proposal.get('reasoning', 'No se proporcionó un razonamiento para esta propuesta.')
+        inputs = proposal.get('inputs', 'No especificados')
+        outputs = proposal.get('outputs', 'No especificados')
 
+        with st.expander(f"**{title}**", expanded=i==0):
+            st.markdown(f"**Razonamiento:** *{reasoning}*")
+            st.markdown(f"**Inputs sugeridos:** `{inputs}`")
+            st.markdown(f"**Outputs sugeridos:** `{outputs}`")
+            if st.button(f"Seleccionar: {title}", key=f"select_{i}"):
+                st.session_state.selected_proposal = proposal
+                st.session_state.app_status = "proposal_selected"
+                st.rerun()
 # --- 5) FLUJO PRINCIPAL DE LA APLICACIÓN ---
 def main():
     """Función principal que orquesta la aplicación."""
