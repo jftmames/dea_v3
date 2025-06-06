@@ -7,5 +7,5 @@ numpy
 plotly
 ecos
 matplotlib
-# python-pptx  <- Se recomienda eliminar esta línea, no se usa.
 pytest
+xlsxwriter
