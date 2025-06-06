@@ -10,7 +10,6 @@ from openai import OpenAI
 script_dir = os.path.dirname(__file__)
 if script_dir not in sys.path:
     sys.path.insert(0, script_dir)
-
 st.set_page_config(layout="wide", page_title="DEA Deliberativo con IA")
 
 # --- 1) IMPORTACIONES DE MÓDULOS ---
@@ -44,10 +43,8 @@ def cached_explain_tree(_tree):
 # -- Función de Gestión de Estado --
 def initialize_state():
     """Reinicia de forma segura el estado de la sesión Y LIMPIA LA CACHÉ."""
-    # Limpiar la caché de las funciones que dependen del DataFrame cargado
     cached_get_analysis_proposals.clear()
     cached_run_dea_analysis.clear()
-    # Restablecer las variables de estado de la sesión
     st.session_state.app_status = "initial"
     st.session_state.df = None
     st.session_state.proposals_data = None
@@ -59,7 +56,6 @@ def initialize_state():
 
 # -- Funciones de Lógica de IA --
 def get_openai_client():
-    """Inicializa de forma segura el cliente de OpenAI."""
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         st.error("La clave de API de OpenAI no ha sido configurada.")
@@ -68,7 +64,6 @@ def get_openai_client():
     return OpenAI(api_key=api_key)
 
 def chat_completion(prompt: str, use_json_mode: bool = False):
-    """Llamada genérica a OpenAI, con inicialización segura del cliente."""
     client = get_openai_client()
     params = {"model": "gpt-4o", "messages": [{"role": "user", "content": prompt}], "temperature": 0.5}
     if use_json_mode:
@@ -76,7 +71,6 @@ def chat_completion(prompt: str, use_json_mode: bool = False):
     return client.chat.completions.create(**params)
 
 def generate_analysis_proposals(df_columns: list[str], df_head: pd.DataFrame):
-    """Analiza columnas y propone modelos DEA."""
     prompt = (
         "Eres un consultor experto en Data Envelopment Analysis (DEA). Has recibido un conjunto de datos con las siguientes columnas: "
         f"{df_columns}. A continuación se muestran las primeras filas:\n\n{df_head.to_string()}\n\n"
@@ -142,7 +136,7 @@ def render_deliberation_workshop(results):
         st.subheader("Taller de Hipótesis (Usuario)", anchor=False)
         st.info("Usa este taller para explorar tus propias hipótesis.")
         if results.get("model_name") not in ["Índice de Productividad de Malmquist"]:
-            all_vars = st.session_state.selected_proposal['inputs'] + st.session_state.selected_proposal['outputs']
+            all_vars = st.session_state.selected_proposal.get('inputs', []) + st.session_state.selected_proposal.get('outputs', [])
             chart_type = st.selectbox("1. Elige un tipo de análisis:", ["Análisis de Distribución", "Análisis de Correlación"], key="wb_chart_type")
             df_results = results.get('main_df')
             if df_results is not None and not df_results.empty:
@@ -177,7 +171,7 @@ def render_download_section(results):
 
 def render_main_dashboard():
     st.header("Paso 3: Configuración y Ejecución del Análisis", divider="blue")
-    st.markdown(f"**Enfoque seleccionado:** *{st.session_state.selected_proposal['title']}*")
+    st.markdown(f"**Enfoque seleccionado:** *{st.session_state.selected_proposal.get('title', 'N/A')}*")
     model_options = {"Radial (CCR/BCC)": "CCR_BCC", "No Radial (SBM)": "SBM", "Productividad (Malmquist)": "MALMQUIST"}
     model_name = st.selectbox("1. Selecciona el tipo de modelo DEA a aplicar:", list(model_options.keys()))
     model_key = model_options[model_name]
@@ -191,7 +185,7 @@ def render_main_dashboard():
             df = st.session_state.df
             proposal = st.session_state.selected_proposal
             try:
-                st.session_state.dea_results = cached_run_dea_analysis(df, df.columns[0], proposal['inputs'], proposal['outputs'], model_key, period_col)
+                st.session_state.dea_results = cached_run_dea_analysis(df, df.columns[0], proposal.get('inputs', []), proposal.get('outputs', []), model_key, period_col)
                 st.session_state.app_status = "results_ready"
             except Exception as e:
                 st.error(f"Error durante el análisis: {e}"); st.session_state.dea_results = None
@@ -206,10 +200,21 @@ def render_main_dashboard():
         render_deliberation_workshop(results)
 
 def render_validation_step():
+    """Renderiza el paso de validación con una capa de seguridad extra."""
     st.header("Paso 2b: Validación del Modelo", divider="gray")
     proposal = st.session_state.selected_proposal
+    
+    # --- CORRECCIÓN: Segunda capa de seguridad ---
+    inputs = proposal.get('inputs', [])
+    outputs = proposal.get('outputs', [])
+
+    if not inputs or not outputs:
+        st.error("La propuesta de análisis seleccionada está incompleta (faltan inputs u outputs). Por favor, reinicia el análisis y selecciona una propuesta completa.")
+        st.stop()
+        
     with st.spinner("La IA está validando la coherencia de los datos y el modelo..."):
-        validation_results = validate_data(st.session_state.df, proposal.get('inputs', []), proposal.get('outputs', []))
+        validation_results = validate_data(st.session_state.df, inputs, outputs)
+    
     formal_issues = validation_results.get("formal_issues", [])
     llm_results = validation_results.get("llm", {})
     if formal_issues:
@@ -223,9 +228,11 @@ def render_validation_step():
         if llm_results.get("suggested_fixes"):
             st.markdown("**Sugerencias de mejora:**")
             for fix in llm_results["suggested_fixes"]: st.markdown(f"- *{fix}*")
-    if st.button("Proceder al Análisis"): st.session_state.app_status = "validated"; st.rerun()
+    if st.button("Proceder al Análisis"):
+        st.session_state.app_status = "validated"; st.rerun()
 
 def render_proposal_step():
+    """Renderiza la selección de propuestas, validando cada una al ser seleccionada."""
     st.header("Paso 2: Elige un Enfoque de Análisis", divider="blue")
     if not st.session_state.get('proposals_data'):
         with st.spinner("La IA está analizando tus datos para sugerir enfoques..."):
@@ -248,6 +255,7 @@ def render_proposal_step():
         with st.expander(f"**{title}**", expanded=i==0):
             st.markdown(f"**Razonamiento:** *{reasoning}*"); st.markdown(f"**Inputs sugeridos:** `{inputs}`"); st.markdown(f"**Outputs sugeridos:** `{outputs}`")
             if st.button(f"Seleccionar: {title}", key=f"select_{i}"):
+                # --- CORRECCIÓN: Primera capa de seguridad ---
                 if inputs and outputs:
                     st.session_state.selected_proposal = proposal
                     st.session_state.app_status = "proposal_selected"; st.rerun()
@@ -265,7 +273,6 @@ def render_upload_step():
 # --- 5) FLUJO PRINCIPAL DE LA APLICACIÓN ---
 def main():
     """Función principal que orquesta la aplicación."""
-    # CORRECCIÓN: La inicialización del estado se mueve aquí.
     if 'app_status' not in st.session_state:
         initialize_state()
 
@@ -276,7 +283,6 @@ def main():
     st.sidebar.markdown("---")
     st.sidebar.info("Una herramienta para el análisis de eficiencia y la deliberación estratégica con asistencia de IA.")
 
-    # Máquina de estados que controla qué se renderiza en la pantalla
     if st.session_state.app_status == "initial": render_upload_step()
     elif st.session_state.app_status == "file_loaded": render_proposal_step()
     elif st.session_state.app_status == "proposal_selected": render_validation_step()
