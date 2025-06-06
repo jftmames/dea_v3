@@ -10,9 +10,12 @@ from openai import OpenAI
 script_dir = os.path.dirname(__file__)
 if script_dir not in sys.path:
     sys.path.insert(0, script_dir)
+
 st.set_page_config(layout="wide", page_title="DEA Deliberativo con IA")
 
-# --- 1) IMPORTACIONES DE MÓDULOS ---
+# --- 1) IMPORTACIONES DE MÓDULOS DEL PROYECTO ---
+# Se importan los módulos principales. Las funciones que causaban conflictos
+# se han movido a este fichero o se importan localmente.
 from analysis_dispatcher import execute_analysis
 from inquiry_engine import generate_inquiry, to_plotly_tree
 from epistemic_metrics import compute_eee
@@ -23,7 +26,10 @@ from openai_helpers import explain_inquiry_tree
 
 # --- 2) GESTIÓN DE ESTADO ---
 def initialize_state():
-    """Reinicia de forma segura el estado de la sesión a sus valores iniciales."""
+    """
+    Reinicia de forma segura el estado de la sesión a sus valores iniciales.
+    Este método es más robusto que borrar claves indiscriminadamente.
+    """
     st.session_state.app_status = "initial"
     st.session_state.df = None
     st.session_state.proposals_data = None
@@ -36,9 +42,13 @@ def initialize_state():
 if 'app_status' not in st.session_state:
     initialize_state()
 
-# --- 3) FUNCIONES DE IA Y CACHÉ (CON INICIALIZACIÓN SEGURA) ---
+# --- 3) FUNCIONES DE IA Y CACHÉ (CON SOLUCIONES INTEGRADAS) ---
+
 def get_openai_client():
-    """Inicializa de forma segura el cliente de OpenAI."""
+    """
+    Inicializa de forma segura el cliente de OpenAI.
+    Muestra un error claro en la UI y detiene la app si la clave no existe.
+    """
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         st.error("La clave de API de OpenAI no ha sido configurada.")
@@ -47,6 +57,7 @@ def get_openai_client():
     return OpenAI(api_key=api_key)
 
 def chat_completion(prompt: str, use_json_mode: bool = False):
+    """Llamada genérica a OpenAI, con inicialización segura del cliente."""
     client = get_openai_client()
     params = {"model": "gpt-4o", "messages": [{"role": "user", "content": prompt}], "temperature": 0.5}
     if use_json_mode:
@@ -54,6 +65,10 @@ def chat_completion(prompt: str, use_json_mode: bool = False):
     return client.chat.completions.create(**params)
 
 def generate_analysis_proposals(df_columns: list[str], df_head: pd.DataFrame):
+    """
+    Analiza columnas y propone modelos DEA.
+    Definida localmente para evitar errores de importación.
+    """
     prompt = (
         "Eres un consultor experto en Data Envelopment Analysis (DEA). Has recibido un conjunto de datos con las siguientes columnas: "
         f"{df_columns}. A continuación se muestran las primeras filas:\n\n{df_head.to_string()}\n\n"
@@ -86,7 +101,9 @@ def cached_explain_tree(_tree):
     return explain_inquiry_tree(_tree)
 
 # --- 4) COMPONENTES MODULARES DE LA UI ---
+
 def render_eee_explanation(eee_metrics: dict):
+    """Muestra la explicación contextual y dinámica del score EEE."""
     st.info(f"**Calidad del Razonamiento (EEE): {eee_metrics['score']:.2%}**")
     def interpret_score(name, score):
         if score >= 0.8: return f"**{name}:** Tu puntuación es **excelente** ({score:.0%})."
@@ -103,8 +120,10 @@ def render_eee_explanation(eee_metrics: dict):
         """)
 
 def render_deliberation_workshop(results):
+    """Muestra el taller de hipótesis y el mapa de razonamiento con su explicación."""
     st.header("Paso 4: Razona y Explora las Causas con IA", divider="blue")
     col_map, col_workbench = st.columns([2, 1])
+
     with col_map:
         st.subheader("Mapa de Razonamiento (IA)", anchor=False)
         if st.button("Generar/Inspirar con nuevo Mapa de Razonamiento", use_container_width=True):
@@ -112,7 +131,9 @@ def render_deliberation_workshop(results):
                 main_df = results.get('main_df', pd.DataFrame())
                 num_efficient = 0
                 if not main_df.empty and len(main_df.columns) > 1:
-                    num_efficient = int((main_df.iloc[:, 1] >= 0.999).sum())
+                    efficiency_col = main_df.columns[1]
+                    num_efficient = int((main_df[efficiency_col] >= 0.999).sum())
+
                 context = {
                     "model": results.get("model_name"),
                     "inputs": st.session_state.selected_proposal['inputs'],
@@ -130,10 +151,12 @@ def render_deliberation_workshop(results):
                 with st.spinner("La IA está interpretando el mapa para ti..."):
                     explanation_result = cached_explain_tree(st.session_state.inquiry_tree)
                     st.session_state.tree_explanation = explanation_result
+            
             if st.session_state.get("tree_explanation"):
                 explanation = st.session_state.tree_explanation
                 with st.container(border=True):
                     st.markdown(explanation.get("text", "No se pudo generar la explicación."))
+            
             st.plotly_chart(to_plotly_tree(st.session_state.inquiry_tree), use_container_width=True)
             eee_metrics = compute_eee(st.session_state.inquiry_tree, depth_limit=3, breadth_limit=5)
             render_eee_explanation(eee_metrics)
@@ -141,24 +164,44 @@ def render_deliberation_workshop(results):
     with col_workbench:
         st.subheader("Taller de Hipótesis (Usuario)", anchor=False)
         st.info("Usa este taller para explorar tus propias hipótesis.")
+        if results.get("model_name") not in ["Índice de Productividad de Malmquist"]:
+            all_vars = st.session_state.selected_proposal['inputs'] + st.session_state.selected_proposal['outputs']
+            chart_type = st.selectbox("1. Elige un tipo de análisis:", ["Análisis de Distribución", "Análisis de Correlación"], key="wb_chart_type")
+            df_eff = results.get('main_df')
+            if df_eff is not None and not df_eff.empty:
+                efficiency_col_name = df_eff.columns[1]
+                df_eff_generic = df_eff.rename(columns={efficiency_col_name: "efficiency"})
+
+                if chart_type == "Análisis de Distribución":
+                    var_dist = st.selectbox("2. Elige la variable a analizar:", all_vars, key="wb_var_dist")
+                    if st.button("Generar Gráfico de Distribución"):
+                        fig = plot_hypothesis_distribution(df_eff_generic, st.session_state.df, var_dist, st.session_state.df.columns[0])
+                        st.session_state.chart_to_show = fig
+                elif chart_type == "Análisis de Correlación":
+                    var_x = st.selectbox("2. Elige la variable para el eje X:", all_vars, key="wb_var_x")
+                    var_y = st.selectbox("3. Elige la variable para el eje Y:", all_vars, key="wb_var_y")
+                    if st.button("Generar Gráfico de Correlación"):
+                        fig = plot_correlation(df_eff_generic, st.session_state.df, var_x, var_y, st.session_state.df.columns[0])
+                        st.session_state.chart_to_show = fig
+            else:
+                st.warning("No hay datos de resultados para generar gráficos.")
+    
+    if st.session_state.get("chart_to_show"):
+        st.subheader("Resultado de tu Hipótesis", anchor=False)
+        st.plotly_chart(st.session_state.chart_to_show, use_container_width=True)
+        if st.button("Limpiar gráfico"):
+            st.session_state.chart_to_show = None
+            st.rerun()
 
 def render_download_section(results):
     st.subheader("Exportar Análisis Completo", divider="gray")
     col1, col2 = st.columns(2)
     with col1:
         html_report = generate_html_report(analysis_results=results, inquiry_tree=st.session_state.get("inquiry_tree"))
-        st.download_button(
-            label="Descargar Informe en HTML", data=html_report,
-            file_name=f"reporte_dea_{results.get('model_name', 'विश्लेषण').replace(' ', '_').lower()}.html",
-            mime="text/html", use_container_width=True
-        )
+        st.download_button(label="Descargar Informe en HTML", data=html_report, file_name=f"reporte_dea_{results.get('model_name', 'विश्लेषण').replace(' ', '_').lower()}.html", mime="text/html", use_container_width=True)
     with col2:
         excel_report = generate_excel_report(analysis_results=results, inquiry_tree=st.session_state.get("inquiry_tree"))
-        st.download_button(
-            label="Descargar Informe en Excel", data=excel_report,
-            file_name=f"reporte_dea_{results.get('model_name', 'विश्लेषण').replace(' ', '_').lower()}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True
-        )
+        st.download_button(label="Descargar Informe en Excel", data=excel_report, file_name=f"reporte_dea_{results.get('model_name', 'विश्लेषण').replace(' ', '_').lower()}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 
 def render_main_dashboard():
     st.header("Paso 3: Configuración y Ejecución del Análisis", divider="blue")
@@ -217,21 +260,17 @@ def render_proposal_step():
     if not st.session_state.get('proposals_data'):
         with st.spinner("La IA está analizando tus datos para sugerir enfoques..."):
             st.session_state.proposals_data = cached_get_analysis_proposals(st.session_state.df)
-    
     proposals_data = st.session_state.proposals_data
-    
     if "error" in proposals_data:
         st.error("La IA no pudo generar propuestas debido a un error.")
         with st.expander("Ver detalles del error técnico"):
             st.code(proposals_data["error"]); st.markdown("**Contenido recibido de la IA (si lo hubo):**"); st.code(proposals_data.get("raw_content", "N/A"))
         st.stop()
-    
     proposals = proposals_data.get("proposals", [])
     if not proposals:
         st.error("La IA no devolvió ninguna propuesta válida. Revisa el formato de tus datos o intenta de nuevo.")
         with st.expander("Ver respuesta completa recibida de la IA"): st.json(proposals_data)
         st.stop()
-        
     st.info("La IA ha preparado varios enfoques para analizar tus datos. Elige el que mejor se adapte a tu objetivo.")
     for i, proposal in enumerate(proposals):
         with st.expander(f"**Propuesta {i+1}: {proposal['title']}**", expanded=i==0):
