@@ -1,213 +1,103 @@
-# /mount/src/-dea-deliberativo-mvp/src/dea_models/visualizations.py
-
+# jftmames/-dea-deliberativo-mvp/-dea-deliberativo-mvp-b44b8238c978ae0314af30717b9399634d28f8f9/src/dea_models/visualizations.py
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
+import plotly.graph_objects as go  # <-- SE AÑADIÓ ESTA LÍNEA
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
-import streamlit as st # Importa streamlit, necesario si usas st.error
 
-# --- Funciones de Visualización ---
 
-def plot_efficiency_histogram(df_results: pd.DataFrame, efficiency_col: str = 'tec_efficiency_ccr') -> go.Figure:
+def plot_efficiency_histogram(dea_df: pd.DataFrame, bins: int = 20):
     """
-    Genera un histograma de la distribución de la eficiencia técnica.
+    Devuelve un histograma de eficiencias DEA usando Plotly Express.
+    Asume que dea_df tiene la columna 'efficiency'.
     """
     fig = px.histogram(
-        df_results,
-        x=efficiency_col,
-        nbins=20,
-        title='Distribución de la Eficiencia Técnica (CCR)',
-        labels={efficiency_col: 'Eficiencia Técnica'},
-        template='plotly_white'
+        dea_df,
+        x="efficiency",
+        nbins=bins,
+        title="Distribución de eficiencias",
+        labels={"efficiency": "Eficiencia DEA"},
     )
-    fig.update_layout(bargap=0.1)
+    fig.update_layout(margin=dict(l=40, r=40, t=40, b=40))
     return fig
 
-def plot_benchmark_spider(
-    df_results: pd.DataFrame,
-    df_original: pd.DataFrame,
-    dmu_col: str,
-    inputs: list,
-    outputs: list,
-    efficiency_col: str = 'tec_efficiency_ccr',
-    title: str = 'Spider Plot de Rendimiento Promedio (Eficientes vs Ineficientes)'
-) -> go.Figure:
+
+def plot_benchmark_spider(df_merged: pd.DataFrame, selected_dmu: str, input_cols: list[str], output_cols: list[str]):
     """
-    Genera un gráfico de araña (spider plot) para visualizar los inputs/outputs
-    normalizados de DMUs eficientes e ineficientes.
-
-    Parámetros:
-    df_results (pd.DataFrame): DataFrame con los resultados del análisis DEA,
-                               incluyendo la columna de eficiencia.
-    df_original (pd.DataFrame): DataFrame original con los datos de inputs/outputs.
-    dmu_col (str): Nombre de la columna que identifica las DMUs.
-    inputs (list): Lista de nombres de columnas de inputs.
-    outputs (list): Lista de nombres de columnas de outputs.
-    efficiency_col (str): Nombre de la columna de eficiencia (default: 'tec_efficiency_ccr').
-    title (str): Título del gráfico.
+    Devuelve un radar chart comparando la DMU seleccionada vs sus peers eficientes.
     """
-    all_vars = inputs + outputs
+    dmu_col = df_merged.columns[0]
+    if selected_dmu not in df_merged[dmu_col].astype(str).tolist():
+        return px.line_polar(title="Sin datos de DMU")
 
-    # Asegurarse de que las columnas necesarias existen en df_original
-    required_original_cols = [dmu_col] + all_vars
-    if not all(col in df_original.columns for col in required_original_cols):
-        st.error(f"Error: Faltan columnas de inputs/outputs en el DataFrame original. "
-                 f"Asegúrate de que {all_vars} estén en {dmu_col}.")
-        return go.Figure().update_layout(title_text="Error en datos de entrada para Spider Plot.")
+    if "tec_efficiency_ccr" not in df_merged.columns:
+        return px.line_polar(title="Columna de eficiencia no encontrada")
 
-    # Combinar resultados de eficiencia con datos originales
-    df_merged = df_results.merge(df_original[[dmu_col] + all_vars], on=dmu_col, how="left")
+    peers = df_merged[df_merged["tec_efficiency_ccr"] == 1.0]
+    if peers.empty:
+        return px.line_polar(title="Sin peers eficientes para comparar")
 
-    # Separar eficientes e ineficientes
-    df_efficient = df_merged[df_merged[efficiency_col] >= 0.999].copy()
-    df_inefficient = df_merged[df_merged[efficiency_col] < 0.999].copy()
+    dmu_row = df_merged[df_merged[dmu_col].astype(str) == selected_dmu].iloc[0]
+    peers_avg = peers[input_cols + output_cols].mean()
 
-    # Normalizar los datos para el spider plot
-    # Normalizamos cada variable entre 0 y 1 usando el rango global (min y max)
-    # de cada variable en el DataFrame original completo para una comparación justa.
-    df_normalized = df_original[all_vars].apply(lambda x: (x - x.min()) / (x.max() - x.min()))
+    variables = input_cols + output_cols
+    df_radar = pd.DataFrame({
+        "variable": variables * 2,
+        "valor": list(dmu_row[variables]) + list(peers_avg[variables]),
+        "grupo": [f"DMU {selected_dmu}"] * len(variables) + ["Peers promedio"] * len(variables)
+    })
 
-    # Calcular los promedios normalizados para el spider plot
-    avg_efficient_normalized = df_normalized.loc[df_merged[efficiency_col] >= 0.999].mean().tolist()
-    avg_inefficient_normalized = df_normalized.loc[df_merged[efficiency_col] < 0.999].mean().tolist()
-
-    categories = all_vars
-
-    # Para cerrar el círculo en el spider plot, se repite el primer valor al final
-    avg_efficient_normalized = avg_efficient_normalized + [avg_efficient_normalized[0]] if avg_efficient_normalized else [0] * (len(categories) + 1)
-    avg_inefficient_normalized = avg_inefficient_normalized + [avg_inefficient_normalized[0]] if avg_inefficient_normalized else [0] * (len(categories) + 1)
-    categories_closed = categories + [categories[0]] if categories else []
-
-    fig = go.Figure()
-
-    if avg_efficient_normalized:
-        fig.add_trace(go.Scatterpolar(
-            r=avg_efficient_normalized,
-            theta=categories_closed,
-            fill='toself',
-            name='DMUs Eficientes (Promedio Normalizado)',
-            marker=dict(color='green'),
-            opacity=0.7
-        ))
-
-    if avg_inefficient_normalized:
-        fig.add_trace(go.Scatterpolar(
-            r=avg_inefficient_normalized,
-            theta=categories_closed,
-            fill='toself',
-            name='DMUs Ineficientes (Promedio Normalizado)',
-            marker=dict(color='red'),
-            opacity=0.7
-        ))
-
-    fig.update_layout(
-        polar=dict(
-            radialaxis=dict(
-                visible=True,
-                range=[0, 1] # Rango de 0 a 1 para datos normalizados
-            )),
-        showlegend=True,
-        title_text=title
+    fig = px.line_polar(
+        df_radar, r="valor", theta="variable", color="grupo", line_close=True,
+        title=f"Benchmark Spider: {selected_dmu} vs Peers eficientes"
     )
-
+    fig.update_traces(fill="toself")
     return fig
+
 
 def plot_3d_inputs_outputs(
-    df_results: pd.DataFrame,
-    df_original: pd.DataFrame,
-    dmu_col: str,
-    input_cols: list,
-    output_cols: list,
-    efficiency_col: str = 'tec_efficiency_ccr'
-) -> go.Figure:
+    orig_df: pd.DataFrame,
+    inputs: list[str],
+    outputs: list[str],
+    dea_df: pd.DataFrame,
+    dmu_column: str
+):
     """
-    Genera un scatter plot 3D de inputs y outputs, coloreado por eficiencia.
-    Requiere al menos 2 inputs y 1 output, o 1 input y 2 outputs, o 3 variables en total.
+    Scatter 3D: ejes = primeros 2 inputs, tercer eje = primer output, coloreado según eficiencia.
     """
-    all_plotting_vars = []
-    if len(input_cols) >= 1:
-        all_plotting_vars.append(input_cols[0])
-    if len(output_cols) >= 1:
-        all_plotting_vars.append(output_cols[0])
-    if len(input_cols) >= 2:
-        all_plotting_vars.append(input_cols[1])
-    if len(output_cols) >= 2 and len(all_plotting_vars) < 3: # Asegura que no agregamos más de 3 si ya tenemos suficientes
-        all_plotting_vars.append(output_cols[1])
-    
-    # Tomar las primeras 3 variables disponibles para el gráfico 3D
-    x_col = all_plotting_vars[0] if len(all_plotting_vars) > 0 else None
-    y_col = all_plotting_vars[1] if len(all_plotting_vars) > 1 else None
-    z_col = all_plotting_vars[2] if len(all_plotting_vars) > 2 else None
-
-    if not x_col or not y_col or not z_col:
-        st.warning("No hay suficientes inputs/outputs para un gráfico 3D significativo (se necesitan al menos 3 variables).")
-        return go.Figure().update_layout(title_text="Gráfico 3D no disponible: Insuficientes variables.")
-
-    df_merged = df_results.merge(df_original[[dmu_col, x_col, y_col, z_col]], on=dmu_col, how="left")
-    df_merged['Estatus'] = df_merged[efficiency_col].apply(lambda x: 'Eficiente' if x >= 0.999 else 'Ineficiente')
+    merged = dea_df.merge(orig_df, on=dmu_column, how="left")
+    x_col = inputs[0]
+    y_col = inputs[1] if len(inputs) >= 2 else inputs[0]
+    z_col = outputs[0]
 
     fig = px.scatter_3d(
-        df_merged,
-        x=x_col,
-        y=y_col,
-        z=z_col,
-        color='Estatus',
-        title=f"Rendimiento en 3D: {x_col} vs {y_col} vs {z_col}",
-        color_discrete_map={'Eficiente': 'green', 'Ineficiente': 'red'},
-        hover_name=dmu_col
+        merged, x=x_col, y=y_col, z=z_col, color="efficiency",
+        hover_name=dmu_column, title="Scatter 3D de Inputs vs Output (coloreado por eficiencia)",
+        labels={x_col: x_col, y_col: y_col, z_col: z_col, "efficiency": "Eficiencia"},
     )
-    fig.update_layout(margin=dict(l=40, r=40, t=50, b=40))
+    fig.update_layout(margin=dict(l=40, r=40, t=40, b=40))
     return fig
 
-def plot_slack_waterfall(
-    df_results: pd.DataFrame,
-    dmu_col: str,
-    slack_cols: list,
-    dmu_selected: str
-) -> go.Figure:
-    """
-    Genera un gráfico de cascada (waterfall) para mostrar las holguras de inputs/outputs
-    para una DMU seleccionada.
-    """
-    if dmu_selected not in df_results[dmu_col].values:
-        return go.Figure().update_layout(title_text=f"Error: La DMU '{dmu_selected}' no se encontró.")
 
-    df_dmu = df_results[df_results[dmu_col] == dmu_selected].iloc[0]
-
+def plot_slack_waterfall(slacks_in: dict, slacks_out: dict, dmu_name: str):
+    """ Dibuja un gráfico de cascada con los slacks. """
     data = []
-    measures = []
-    x_labels = []
-
-    for col in slack_cols:
-        if col in df_dmu:
-            value = df_dmu[col]
-            if value != 0:
-                data.append(value)
-                measures.append("relative") # Todas son relativas al inicio, no una base inicial
-                x_labels.append(col)
+    for k, v in slacks_in.items():
+        if v > 1e-6: data.append({'variable': k, 'valor': -v, 'tipo': 'Exceso de Input'})
+    for k, v in slacks_out.items():
+        if v > 1e-6: data.append({'variable': k, 'valor': v, 'tipo': 'Déficit de Output'})
 
     if not data:
-        return go.Figure().update_layout(title_text=f"No hay holguras para mostrar para {dmu_selected}.")
+        fig, ax = plt.subplots()
+        ax.text(0.5, 0.5, f"DMU {dmu_name} es eficiente (sin slacks).", ha='center', va='center')
+        return fig
 
-    fig = go.Figure(go.Waterfall(
-        name="Holguras",
-        orientation="v",
-        measure=measures,
-        x=x_labels,
-        textposition="outside",
-        text=[f"{val:.2f}" for val in data],
-        y=data,
-        connector={"line":{"color":"rgb(63, 63, 63)"}},
-    ))
-
-    fig.update_layout(
-        title = f"Holguras para DMU: {dmu_selected}",
-        showlegend = True
-    )
+    df_plot = pd.DataFrame(data)
+    fig = px.bar(df_plot, x='variable', y='valor', color='tipo', title=f"Slacks para DMU {dmu_name}",
+                 color_discrete_map={'Exceso de Input': 'red', 'Déficit de Output': 'green'})
     return fig
 
-
+# --- NUEVA FUNCIÓN ---
 def plot_hypothesis_distribution(
     df_results: pd.DataFrame,
     df_original: pd.DataFrame,
@@ -222,13 +112,21 @@ def plot_hypothesis_distribution(
     if variable not in df_original.columns:
         return go.Figure().update_layout(title_text=f"Error: La variable '{variable}' no existe.")
 
+    # Unir resultados con datos originales
     df_merged = df_results.merge(df_original[[dmu_col, variable]], on=dmu_col, how="left")
+
+    # Crear columna de estado (Eficiente / Ineficiente)
     df_merged['Estatus'] = df_merged[efficiency_col].apply(lambda x: 'Eficiente' if x >= 0.999 else 'Ineficiente')
 
+    # Crear el gráfico
     fig = px.box(
-        df_merged, x='Estatus', y=variable, color='Estatus',
+        df_merged,
+        x='Estatus',
+        y=variable,
+        color='Estatus',
         title=f"Comparación de '{variable}' entre Unidades Eficientes e Ineficientes",
-        points="all", labels={"Estatus": "Estatus de Eficiencia", variable: f"Valor de {variable}"},
+        points="all",  # Muestra todos los puntos
+        labels={"Estatus": "Estatus de Eficiencia", variable: f"Valor de {variable}"},
         color_discrete_map={'Eficiente': 'green', 'Ineficiente': 'red'}
     )
     fig.update_layout(margin=dict(l=40, r=40, t=50, b=40))
@@ -249,7 +147,7 @@ def plot_correlation(
     """
     if var_x not in df_original.columns or var_y not in df_original.columns:
         return go.Figure().update_layout(title_text=f"Error: Una de las variables no existe.")
-        
+
     df_merged = df_results.merge(df_original[[dmu_col, var_x, var_y]], on=dmu_col, how="left")
     df_merged['Estatus'] = df_merged[efficiency_col].apply(lambda x: 'Eficiente' if x >= 0.999 else 'Ineficiente')
 
@@ -258,7 +156,7 @@ def plot_correlation(
         title=f"Correlación entre '{var_x}' y '{var_y}'",
         color_discrete_map={'Eficiente': 'green', 'Ineficiente': 'red'},
         hover_name=dmu_col,
-        trendline="ols", # Añade una línea de tendencia
+        trendline="ols",  # Añade una línea de tendencia
         trendline_scope="overall"
     )
     fig.update_layout(margin=dict(l=40, r=40, t=50, b=40))
