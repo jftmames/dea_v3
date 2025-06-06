@@ -27,9 +27,13 @@ from openai_helpers import explain_inquiry_tree
 # --- 2) GESTIÓN DE ESTADO ---
 def initialize_state():
     """
-    Reinicia de forma segura el estado de la sesión a sus valores iniciales.
-    Este método es más robusto que borrar claves indiscriminadamente.
+    Reinicia de forma segura el estado de la sesión Y LIMPIA LA CACHÉ relevante.
     """
+    # Limpiar la caché de las funciones que dependen del DataFrame
+    cached_get_analysis_proposals.clear()
+    cached_run_dea_analysis.clear()
+
+    # Restablecer las variables de estado de la sesión
     st.session_state.app_status = "initial"
     st.session_state.df = None
     st.session_state.proposals_data = None
