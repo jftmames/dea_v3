@@ -14,10 +14,11 @@ if script_dir not in sys.path:
 st.set_page_config(layout="wide", page_title="DEA Deliberativo con IA")
 
 # --- 1) IMPORTACIONES DE MÓDULOS DEL PROYECTO ---
+# Se importan los módulos principales. Las funciones más específicas se importarán
+# localmente dentro de las funciones para evitar problemas de importación circular.
 from analysis_dispatcher import execute_analysis
 from inquiry_engine import generate_inquiry, to_plotly_tree
 from epistemic_metrics import compute_eee
-from openai_helpers import generate_analysis_proposals, explain_inquiry_tree
 from data_validator import validate as validate_data
 from report_generator import generate_html_report, generate_excel_report
 from dea_models.visualizations import plot_hypothesis_distribution, plot_correlation
@@ -34,26 +35,24 @@ if 'app_status' not in st.session_state:
     initialize_state()
 
 # --- 3) FUNCIONES DE CACHÉ ---
+# Estas funciones cachean los resultados de operaciones costosas para mejorar el rendimiento.
 @st.cache_data
 def cached_get_analysis_proposals(_df):
-    """Cachea las propuestas de la IA para un DataFrame dado."""
+    from openai_helpers import generate_analysis_proposals
     return generate_analysis_proposals(_df.columns.tolist(), _df.head())
 
 @st.cache_data
 def cached_run_dea_analysis(_df, dmu_col, input_cols, output_cols, model_key, period_col):
-    """Cachea los resultados del análisis DEA para cualquier modelo."""
     return execute_analysis(_df.copy(), dmu_col, input_cols, output_cols, model_key, period_column=period_col)
 
 @st.cache_data
 def cached_run_inquiry_engine(root_question, _context):
-    """Cachea el árbol de indagación generado por la IA."""
     return generate_inquiry(root_question, context=_context)
 
 @st.cache_data
 def cached_explain_tree(_tree):
-    """Cachea la explicación del árbol de indagación."""
+    from openai_helpers import explain_inquiry_tree
     return explain_inquiry_tree(_tree)
-
 
 # --- 4) COMPONENTES MODULARES DE LA UI ---
 
@@ -86,10 +85,8 @@ def render_deliberation_workshop(results):
         if st.button("Generar/Inspirar con nuevo Mapa de Razonamiento", use_container_width=True):
             with st.spinner("La IA está generando un mapa de ideas..."):
                 main_df = results.get('main_df', pd.DataFrame())
-                # Corrección del TypeError: convertir tipos de numpy a tipos nativos de Python
                 num_efficient = 0
-                if not main_df.empty and main_df.columns[1] in main_df.columns:
-                    # Asumimos que la segunda columna es la de eficiencia principal
+                if not main_df.empty and len(main_df.columns) > 1:
                     num_efficient = int((main_df.iloc[:, 1] >= 0.999).sum())
 
                 context = {
@@ -114,7 +111,7 @@ def render_deliberation_workshop(results):
                 explanation = st.session_state.tree_explanation
                 with st.container(border=True):
                     st.markdown(explanation.get("text", "No se pudo generar la explicación."))
-
+            
             st.plotly_chart(to_plotly_tree(st.session_state.inquiry_tree), use_container_width=True)
             eee_metrics = compute_eee(st.session_state.inquiry_tree, depth_limit=3, breadth_limit=5)
             render_eee_explanation(eee_metrics)
@@ -225,6 +222,7 @@ def render_validation_step():
 
 def render_proposal_step():
     """Renderiza la selección de propuestas de análisis."""
+    from openai_helpers import generate_analysis_proposals
     st.header("Paso 2: Elige un Enfoque de Análisis", divider="blue")
     if 'proposals' not in st.session_state:
         with st.spinner("La IA está analizando tus datos para sugerir enfoques..."):
