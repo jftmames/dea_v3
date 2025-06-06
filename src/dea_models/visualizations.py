@@ -98,19 +98,24 @@ def plot_slack_waterfall(slacks_in: dict, slacks_out: dict, dmu_name: str):
     return fig
 
 # --- NUEVA FUNCIÓN ---
+# En el fichero: src/dea_models/visualizations.py
+
 def plot_hypothesis_distribution(
     df_results: pd.DataFrame,
     df_original: pd.DataFrame,
     variable: str,
-    dmu_col: str,
-    efficiency_col: str = 'tec_efficiency_ccr'
+    dmu_col: str
+    # --- PARÁMETRO 'efficiency_col' ELIMINADO ---
 ) -> go.Figure:
     """
     Genera un box plot para comparar la distribución de una variable entre
-    unidades eficientes e ineficientes.
+    unidades eficientes e ineficientes, usando un nombre de columna de eficiencia estandarizado.
     """
     if variable not in df_original.columns:
         return go.Figure().update_layout(title_text=f"Error: La variable '{variable}' no existe.")
+
+    # La columna de eficiencia ahora se asume que se llama 'efficiency'
+    efficiency_col = 'efficiency'
 
     # Unir resultados con datos originales
     df_merged = df_results.merge(df_original[[dmu_col, variable]], on=dmu_col, how="left")
@@ -125,13 +130,12 @@ def plot_hypothesis_distribution(
         y=variable,
         color='Estatus',
         title=f"Comparación de '{variable}' entre Unidades Eficientes e Ineficientes",
-        points="all",  # Muestra todos los puntos
+        points="all",
         labels={"Estatus": "Estatus de Eficiencia", variable: f"Valor de {variable}"},
         color_discrete_map={'Eficiente': 'green', 'Ineficiente': 'red'}
     )
     fig.update_layout(margin=dict(l=40, r=40, t=50, b=40))
     return fig
-
 # --- NUEVA FUNCIÓN PARA EL TALLER DE HIPÓTESIS ---
 def plot_correlation(
     df_results: pd.DataFrame,
