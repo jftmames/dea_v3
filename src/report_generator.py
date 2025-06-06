@@ -2,113 +2,118 @@ import pandas as pd
 import datetime
 from io import BytesIO
 
+# Nota: Para guardar gráficos de Plotly en Excel, se necesitaría una librería adicional
+# como 'xlsxwriter' y manejar los gráficos como imágenes. Por simplicidad en este paso,
+# el informe Excel se centrará en los datos tabulares, que es lo más crítico.
+
 def generate_html_report(
-    df_dea: pd.DataFrame,
-    df_tree: pd.DataFrame,
-    df_eee: pd.DataFrame
+    analysis_results: dict,
+    inquiry_tree: dict | None = None
 ) -> str:
     """
-    Genera un string con contenido HTML que incluye:
-      - Título con fecha
-      - Tabla de resultados DEA
-      - Tabla de árbol de indagación (padre/hijo)
-      - Tabla de metadatos EEE
-    Retorna HTML listo para escribir a disco o servir como descarga.
+    Genera un string con contenido HTML que se adapta a los resultados del análisis.
+    
+    Args:
+        analysis_results (dict): El diccionario de resultados de analysis_dispatcher.
+        inquiry_tree (dict): El árbol de indagación generado por la IA.
     """
-
     # Convertir None en DataFrame vacío
-    if df_dea is None:
-        df_dea = pd.DataFrame()
-    if df_tree is None:
-        df_tree = pd.DataFrame()
-    if df_eee is None:
-        df_eee = pd.DataFrame()
+    df_results = analysis_results.get("main_df", pd.DataFrame())
+    model_name = analysis_results.get("model_name", "Análisis DEA")
+    
+    df_tree_data = pd.DataFrame()
+    if inquiry_tree:
+        # Aplanar el árbol para una representación tabular simple
+        rows = []
+        root_question = list(inquiry_tree.keys())[0]
+        def walk(node, parent):
+            for pregunta, hijos in node.items():
+                rows.append({"parent": parent, "child": pregunta})
+                if isinstance(hijos, dict): walk(hijos, pregunta)
+        walk(inquiry_tree, "")
+        df_tree_data = pd.DataFrame(rows)
+
 
     fecha = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     html = (
         "<html><head><meta charset='utf-8'>"
         "<style>"
-        "table {border-collapse: collapse; width: 100%;}"
-        "th, td {border: 1px solid #ddd; padding: 8px;}"
+        "body {font-family: sans-serif;}"
+        "table {border-collapse: collapse; width: 100%; margin-bottom: 2em;}"
+        "th, td {border: 1px solid #ddd; padding: 8px; text-align: left;}"
         "th {background-color: #f2f2f2;}"
+        "h1, h2 {color: #333;}"
         "</style>"
         f"<title>Reporte DEA Deliberativo – {fecha}</title></head><body>"
     )
     html += f"<h1>Reporte DEA Deliberativo – {fecha}</h1>"
 
-    # Sección DEA
-    html += "<h2>1. Resultados DEA</h2>"
-    html += df_dea.to_html(index=False, border=1, justify="left")
+    # Sección de Resultados DEA (dinámica)
+    html += f"<h2>1. Resultados del Modelo: {model_name}</h2>"
+    if not df_results.empty:
+        html += df_results.to_html(index=False, border=1, justify="left", na_rep="-")
+    else:
+        html += "<p>No se generaron resultados numéricos para este modelo.</p>"
 
-    # Sección Árbol
-    html += "<h2>2. Estructura de Complejo de Indagación</h2>"
-    html += df_tree.to_html(index=False, border=1, justify="left")
-
-    # Sección EEE
-    html += "<h2>3. Métrico EEE y Metadatos</h2>"
-    html += df_eee.to_html(index=False, border=1, justify="left")
+    # Sección Árbol de Indagación
+    if not df_tree_data.empty:
+        html += "<h2>2. Estructura del Mapa de Razonamiento</h2>"
+        html += df_tree_data.to_html(index=False, border=1, justify="left")
 
     html += "</body></html>"
     return html
 
 
 def generate_excel_report(
-    df_dea: pd.DataFrame,
-    df_tree: pd.DataFrame,
-    df_eee: pd.DataFrame
+    analysis_results: dict,
+    inquiry_tree: dict | None = None
 ) -> BytesIO:
     """
-    Genera un reporte Excel en memoria con varias pestañas:
-      - "DEA Results": resultados DEA
-      - "Inquiry Tree": tabla de árbol de indagación
-      - "EEE Metrics": tabla de EEE
-    Retorna un objeto BytesIO con el contenido del archivo .xlsx.
+    Genera un reporte Excel en memoria con pestañas dinámicas.
+    
+    Args:
+        analysis_results (dict): El diccionario de resultados de analysis_dispatcher.
+        inquiry_tree (dict): El árbol de indagación generado por la IA.
     """
+    df_results = analysis_results.get("main_df", pd.DataFrame())
+    model_name = analysis_results.get("model_name", "Resultados")
+    # Limpiar el nombre del modelo para que sea un nombre de hoja válido
+    sheet_name = ''.join(c for c in model_name if c.isalnum())[:30]
 
-    # Convertir None en DataFrame vacío
-    if df_dea is None:
-        df_dea = pd.DataFrame()
-    if df_tree is None:
-        df_tree = pd.DataFrame()
-    if df_eee is None:
-        df_eee = pd.DataFrame()
+    df_tree_data = pd.DataFrame()
+    if inquiry_tree:
+        rows = []
+        def walk(node, parent):
+            for pregunta, hijos in node.items():
+                rows.append({"parent": parent, "child": pregunta})
+                if isinstance(hijos, dict): walk(hijos, pregunta)
+        walk(inquiry_tree, "")
+        df_tree_data = pd.DataFrame(rows)
+
 
     output = BytesIO()
-    # Usamos engine xlsxwriter por compatibilidad
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-        # 1) Hoja DEA Results
-        df_dea.to_excel(writer, sheet_name="DEA Results", index=False)
-        worksheet_dea = writer.sheets["DEA Results"]
-        for idx, col in enumerate(df_dea.columns):
-            max_len = (
-                df_dea[col].astype(str).map(len).max()
-                if not df_dea.empty else 0
-            )
-            max_len = max(max_len, len(col)) + 2
-            worksheet_dea.set_column(idx, idx, max_len)
+        # 1) Hoja de Resultados (nombre dinámico)
+        df_results.to_excel(writer, sheet_name=sheet_name, index=False)
+        worksheet_results = writer.sheets[sheet_name]
+        # Auto-ajustar columnas
+        for idx, col in enumerate(df_results.columns):
+            max_len = max(
+                df_results[col].astype(str).map(len).max() if not df_results.empty else 0,
+                len(str(col))
+            ) + 2
+            worksheet_results.set_column(idx, idx, max_len)
 
-        # 2) Hoja Inquiry Tree
-        df_tree.to_excel(writer, sheet_name="Inquiry Tree", index=False)
-        worksheet_tree = writer.sheets["Inquiry Tree"]
-        for idx, col in enumerate(df_tree.columns):
-            max_len = (
-                df_tree[col].astype(str).map(len).max()
-                if not df_tree.empty else 0
-            )
-            max_len = max(max_len, len(col)) + 2
-            worksheet_tree.set_column(idx, idx, max_len)
-
-        # 3) Hoja EEE Metrics
-        df_eee.to_excel(writer, sheet_name="EEE Metrics", index=False)
-        worksheet_eee = writer.sheets["EEE Metrics"]
-        for idx, col in enumerate(df_eee.columns):
-            max_len = (
-                df_eee[col].astype(str).map(len).max()
-                if not df_eee.empty else 0
-            )
-            max_len = max(max_len, len(col)) + 2
-            worksheet_eee.set_column(idx, idx, max_len)
-        # No llamamos a writer.save(), el 'with' se encarga
+        # 2) Hoja del Árbol de Indagación
+        if not df_tree_data.empty:
+            df_tree_data.to_excel(writer, sheet_name="Mapa_Razonamiento", index=False)
+            worksheet_tree = writer.sheets["Mapa_Razonamiento"]
+            for idx, col in enumerate(df_tree_data.columns):
+                max_len = max(
+                    df_tree_data[col].astype(str).map(len).max() if not df_tree_data.empty else 0,
+                    len(str(col))
+                ) + 2
+                worksheet_tree.set_column(idx, idx, max_len)
 
     output.seek(0)
     return output
