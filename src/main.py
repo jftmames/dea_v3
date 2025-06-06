@@ -37,12 +37,8 @@ if 'app_status' not in st.session_state:
     initialize_state()
 
 # --- 3) FUNCIONES DE IA Y CACHÉ (CON INICIALIZACIÓN SEGURA) ---
-
 def get_openai_client():
-    """
-    Inicializa de forma segura el cliente de OpenAI.
-    Muestra un error claro en la UI y detiene la app si la clave no existe.
-    """
+    """Inicializa de forma segura el cliente de OpenAI."""
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         st.error("La clave de API de OpenAI no ha sido configurada.")
@@ -51,7 +47,7 @@ def get_openai_client():
     return OpenAI(api_key=api_key)
 
 def chat_completion(prompt: str, use_json_mode: bool = False):
-    client = get_openai_client() # <-- INICIALIZACIÓN SEGURA
+    client = get_openai_client()
     params = {"model": "gpt-4o", "messages": [{"role": "user", "content": prompt}], "temperature": 0.5}
     if use_json_mode:
         params["response_format"] = {"type": "json_object"}
@@ -90,7 +86,6 @@ def cached_explain_tree(_tree):
     return explain_inquiry_tree(_tree)
 
 # --- 4) COMPONENTES MODULARES DE LA UI ---
-# (El código de las funciones render_* se mantiene igual que en la versión funcional anterior)
 def render_eee_explanation(eee_metrics: dict):
     st.info(f"**Calidad del Razonamiento (EEE): {eee_metrics['score']:.2%}**")
     def interpret_score(name, score):
@@ -110,7 +105,6 @@ def render_eee_explanation(eee_metrics: dict):
 def render_deliberation_workshop(results):
     st.header("Paso 4: Razona y Explora las Causas con IA", divider="blue")
     col_map, col_workbench = st.columns([2, 1])
-
     with col_map:
         st.subheader("Mapa de Razonamiento (IA)", anchor=False)
         if st.button("Generar/Inspirar con nuevo Mapa de Razonamiento", use_container_width=True):
@@ -119,7 +113,6 @@ def render_deliberation_workshop(results):
                 num_efficient = 0
                 if not main_df.empty and len(main_df.columns) > 1:
                     num_efficient = int((main_df.iloc[:, 1] >= 0.999).sum())
-
                 context = {
                     "model": results.get("model_name"),
                     "inputs": st.session_state.selected_proposal['inputs'],
@@ -137,12 +130,10 @@ def render_deliberation_workshop(results):
                 with st.spinner("La IA está interpretando el mapa para ti..."):
                     explanation_result = cached_explain_tree(st.session_state.inquiry_tree)
                     st.session_state.tree_explanation = explanation_result
-            
             if st.session_state.get("tree_explanation"):
                 explanation = st.session_state.tree_explanation
                 with st.container(border=True):
                     st.markdown(explanation.get("text", "No se pudo generar la explicación."))
-            
             st.plotly_chart(to_plotly_tree(st.session_state.inquiry_tree), use_container_width=True)
             eee_metrics = compute_eee(st.session_state.inquiry_tree, depth_limit=3, breadth_limit=5)
             render_eee_explanation(eee_metrics)
@@ -150,30 +141,21 @@ def render_deliberation_workshop(results):
     with col_workbench:
         st.subheader("Taller de Hipótesis (Usuario)", anchor=False)
         st.info("Usa este taller para explorar tus propias hipótesis.")
-        # Aquí puedes añadir la lógica del taller de hipótesis si lo deseas
 
 def render_download_section(results):
     st.subheader("Exportar Análisis Completo", divider="gray")
     col1, col2 = st.columns(2)
-
     with col1:
-        html_report = generate_html_report(
-            analysis_results=results, inquiry_tree=st.session_state.get("inquiry_tree")
-        )
+        html_report = generate_html_report(analysis_results=results, inquiry_tree=st.session_state.get("inquiry_tree"))
         st.download_button(
-            label="Descargar Informe en HTML",
-            data=html_report,
+            label="Descargar Informe en HTML", data=html_report,
             file_name=f"reporte_dea_{results.get('model_name', 'विश्लेषण').replace(' ', '_').lower()}.html",
             mime="text/html", use_container_width=True
         )
-
     with col2:
-        excel_report = generate_excel_report(
-            analysis_results=results, inquiry_tree=st.session_state.get("inquiry_tree")
-        )
+        excel_report = generate_excel_report(analysis_results=results, inquiry_tree=st.session_state.get("inquiry_tree"))
         st.download_button(
-            label="Descargar Informe en Excel",
-            data=excel_report,
+            label="Descargar Informe en Excel", data=excel_report,
             file_name=f"reporte_dea_{results.get('model_name', 'विश्लेषण').replace(' ', '_').lower()}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True
         )
@@ -232,20 +214,24 @@ def render_validation_step():
 
 def render_proposal_step():
     st.header("Paso 2: Elige un Enfoque de Análisis", divider="blue")
-    if 'proposals_data' not in st.session_state:
+    if not st.session_state.get('proposals_data'):
         with st.spinner("La IA está analizando tus datos para sugerir enfoques..."):
             st.session_state.proposals_data = cached_get_analysis_proposals(st.session_state.df)
+    
     proposals_data = st.session_state.proposals_data
+    
     if "error" in proposals_data:
         st.error("La IA no pudo generar propuestas debido a un error.")
         with st.expander("Ver detalles del error técnico"):
             st.code(proposals_data["error"]); st.markdown("**Contenido recibido de la IA (si lo hubo):**"); st.code(proposals_data.get("raw_content", "N/A"))
         st.stop()
+    
     proposals = proposals_data.get("proposals", [])
     if not proposals:
         st.error("La IA no devolvió ninguna propuesta válida. Revisa el formato de tus datos o intenta de nuevo.")
         with st.expander("Ver respuesta completa recibida de la IA"): st.json(proposals_data)
         st.stop()
+        
     st.info("La IA ha preparado varios enfoques para analizar tus datos. Elige el que mejor se adapte a tu objetivo.")
     for i, proposal in enumerate(proposals):
         with st.expander(f"**Propuesta {i+1}: {proposal['title']}**", expanded=i==0):
@@ -270,7 +256,6 @@ def main():
     st.sidebar.markdown("---")
     st.sidebar.info("Una herramienta para el análisis de eficiencia y la deliberación estratégica con asistencia de IA.")
 
-    # Máquina de estados que controla qué se renderiza en la pantalla
     if st.session_state.app_status == "initial": render_upload_step()
     elif st.session_state.app_status == "file_loaded": render_proposal_step()
     elif st.session_state.app_status == "proposal_selected": render_validation_step()
