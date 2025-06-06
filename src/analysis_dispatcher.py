@@ -24,29 +24,35 @@ def execute_analysis(
         results["model_name"] = "Radial (CCR y BCC)"
         df_ccr = run_ccr(df, dmu_column, inputs, outputs)
 
-        # --- NUEVA VERIFICACIÓN DE ROBUSTEZ ---
-        # Antes de usar la columna, comprobamos que el cálculo de CCR la haya generado.
+        # Verificación de robustez: se comprueba que el cálculo de CCR generó la columna esperada.
         if 'tec_efficiency_ccr' not in df_ccr.columns:
             raise ValueError(
                 "El cálculo del modelo CCR no produjo la columna de resultados esperada ('tec_efficiency_ccr'). "
                 "Esto puede deberse a un problema con la estructura de los datos de entrada que impide al solver encontrar una solución."
             )
         
-        # El resto del proceso continúa como antes
+        # Se crea una copia con la columna renombrada solo para el gráfico de histograma.
         df_ccr_hist = df_ccr.rename(columns={"tec_efficiency_ccr": "efficiency"})
-        df_bcc = run_bcc(df, dmu_column, inputs, outputs, df_ccr_results=df_ccr_hist)
+        
+        # CORRECCIÓN: Se pasa el DataFrame original 'df_ccr' a run_bcc.
+        df_bcc = run_bcc(df, dmu_column, inputs, outputs, df_ccr_results=df_ccr)
         
         main_df = pd.DataFrame()
+        # Se verifica que ambos DataFrames no estén vacíos antes de unirlos.
         if not df_ccr.empty and not df_bcc.empty:
+            # Se renombra la columna de eficiencia de BCC para evitar conflictos en el merge.
+            df_bcc_renamed = df_bcc.rename(columns={"efficiency": "pure_efficiency_bcc"})
             main_df = df_ccr.merge(
-                df_bcc[[dmu_column, 'efficiency', 'scale_efficiency', 'rts_label']],
+                df_bcc_renamed[[dmu_column, 'pure_efficiency_bcc', 'scale_efficiency', 'rts_label']],
                 on=dmu_column
             )
-            main_df = main_df.rename(columns={"efficiency": "pure_efficiency_bcc"})
         
         results["main_df"] = main_df
         results["charts"]["hist_ccr"] = plot_efficiency_histogram(df_ccr_hist)
-        results["charts"]["hist_bcc"] = plot_efficiency_histogram(df_bcc)
+        
+        if not df_bcc.empty:
+            results["charts"]["hist_bcc"] = plot_efficiency_histogram(df_bcc)
+            
         return results
 
     elif model_key == 'SBM':
