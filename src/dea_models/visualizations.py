@@ -148,19 +148,34 @@ def plot_correlation(
     if var_x not in df_original.columns or var_y not in df_original.columns:
         return go.Figure().update_layout(title_text=f"Error: Una de las variables no existe.")
 
+    # Asegurarnos de que no haya nombres de columnas duplicados al hacer el merge
+    df_original_unique = df_original.loc[:, ~df_original.columns.duplicated()].copy()
+
     df_merge_cols = [dmu_col, var_x]
     if var_x != var_y:
-        df_merge_cols.append(var_y)
-    df_merged = df_results.merge(df_original[df_merge_cols], on=dmu_col, how="left")
+        if var_y not in df_merge_cols:
+            df_merge_cols.append(var_y)
+
+    df_merged = df_results.merge(df_original_unique[df_merge_cols], on=dmu_col, how="left")
+    df_merged = df_merged.loc[:, ~df_merged.columns.duplicated()]
     df_merged['Estatus'] = df_merged[efficiency_col].apply(lambda x: 'Eficiente' if x >= 0.999 else 'Ineficiente')
 
-    fig = px.scatter(
-        df_merged, x=var_x, y=var_y, color='Estatus',
+    scatter_kwargs = dict(
+        data_frame=df_merged,
+        x=var_x,
+        y=var_y,
+        color='Estatus',
         title=f"Correlación entre '{var_x}' y '{var_y}'",
         color_discrete_map={'Eficiente': 'green', 'Ineficiente': 'red'},
         hover_name=dmu_col,
-        trendline="ols",  # Añade una línea de tendencia
-        trendline_scope="overall"
     )
+
+    try:
+        import statsmodels.api  # noqa: F401
+        scatter_kwargs.update(trendline="ols", trendline_scope="overall")
+    except ModuleNotFoundError:
+        pass
+
+    fig = px.scatter(**scatter_kwargs)
     fig.update_layout(margin=dict(l=40, r=40, t=50, b=40))
     return fig
