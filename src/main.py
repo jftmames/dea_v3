@@ -10,30 +10,40 @@ from openai import OpenAI
 script_dir = os.path.dirname(__file__)
 if script_dir not in sys.path:
     sys.path.insert(0, script_dir)
+
 st.set_page_config(layout="wide", page_title="DEA Deliberativo con IA")
 
-# --- 1) IMPORTACIONES DE MÓDULOS ---
+# --- 1) IMPORTACIONES DE MÓDULOS DEL PROYECTO ---
 from analysis_dispatcher import execute_analysis
 from inquiry_engine import generate_inquiry, to_plotly_tree
 from epistemic_metrics import compute_eee
 from data_validator import validate as validate_data
 from report_generator import generate_html_report, generate_excel_report
 from dea_models.visualizations import plot_hypothesis_distribution, plot_correlation
-from openai_helpers import explain_inquiry_tree
+# La importación de openai_helpers se hará de forma local para evitar errores
+# from openai_helpers import explain_inquiry_tree
 
 # --- 2) GESTIÓN DE ESTADO ---
 def initialize_state():
-    for key in list(st.session_state.keys()):
-        if not key.startswith('_'):
-            del st.session_state[key]
+    """
+    Reinicia de forma segura el estado de la sesión a sus valores iniciales.
+    En lugar de borrar todas las claves, se restablecen explícitamente las que usa la app.
+    """
     st.session_state.app_status = "initial"
+    st.session_state.df = None
+    st.session_state.proposals = None
+    st.session_state.selected_proposal = None
+    st.session_state.dea_results = None
+    st.session_state.inquiry_tree = None
+    st.session_state.tree_explanation = None
+    st.session_state.chart_to_show = None
+
 
 if 'app_status' not in st.session_state:
     initialize_state()
 
 # --- 3) FUNCIONES DE IA Y CACHÉ ---
-
-# Las funciones conflictivas se mueven aquí para romper el ciclo de importación
+# Las funciones de IA que causaban conflictos de importación se mueven aquí.
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 def chat_completion(prompt: str, use_json_mode: bool = False):
@@ -59,6 +69,7 @@ def generate_analysis_proposals(df_columns: list[str], df_head: pd.DataFrame):
     except Exception as e:
         return {"error": str(e), "text": "No se pudieron generar las propuestas."}
 
+
 @st.cache_data
 def cached_get_analysis_proposals(_df):
     return generate_analysis_proposals(_df.columns.tolist(), _df.head())
@@ -73,9 +84,10 @@ def cached_run_inquiry_engine(root_question, _context):
 
 @st.cache_data
 def cached_explain_tree(_tree):
+    from openai_helpers import explain_inquiry_tree
     return explain_inquiry_tree(_tree)
 
-# --- 4) COMPONENTES MODULARES DE LA UI (sin cambios, solo se pega el código) ---
+# --- 4) COMPONENTES MODULARES DE LA UI ---
 
 def render_eee_explanation(eee_metrics: dict):
     st.info(f"**Calidad del Razonamiento (EEE): {eee_metrics['score']:.2%}**")
@@ -95,28 +107,155 @@ def render_eee_explanation(eee_metrics: dict):
 
 def render_deliberation_workshop(results):
     st.header("Paso 4: Razona y Explora las Causas con IA", divider="blue")
-    # ... (El resto del código de esta función y las demás se mantiene igual)
-    # Aquí iría el código completo de las funciones render_* que ya te he proporcionado antes.
-    # Por brevedad, no lo repito, pero debes asegurarte de que están todas aquí.
-    pass
+    col_map, col_workbench = st.columns([2, 1])
+
+    with col_map:
+        st.subheader("Mapa de Razonamiento (IA)", anchor=False)
+        if st.button("Generar/Inspirar con nuevo Mapa de Razonamiento", use_container_width=True):
+            with st.spinner("La IA está generando un mapa de ideas..."):
+                main_df = results.get('main_df', pd.DataFrame())
+                num_efficient = 0
+                if not main_df.empty and len(main_df.columns) > 1:
+                    num_efficient = int((main_df.iloc[:, 1] >= 0.999).sum())
+
+                context = {
+                    "model": results.get("model_name"),
+                    "inputs": st.session_state.selected_proposal['inputs'],
+                    "outputs": st.session_state.selected_proposal['outputs'],
+                    "num_efficient_dmus": num_efficient
+                }
+                root_question = f"Bajo el enfoque '{st.session_state.selected_proposal['title']}', ¿cuáles son las posibles causas de la ineficiencia observada?"
+                tree, error = cached_run_inquiry_engine(root_question, context)
+                if error: st.error(f"Error al generar el mapa: {error}")
+                st.session_state.inquiry_tree = tree
+                st.session_state.tree_explanation = None
+
+        if st.session_state.get("inquiry_tree"):
+            if not st.session_state.get("tree_explanation"):
+                with st.spinner("La IA está interpretando el mapa para ti..."):
+                    explanation_result = cached_explain_tree(st.session_state.inquiry_tree)
+                    st.session_state.tree_explanation = explanation_result
+            
+            if st.session_state.get("tree_explanation"):
+                explanation = st.session_state.tree_explanation
+                with st.container(border=True):
+                    st.markdown(explanation.get("text", "No se pudo generar la explicación."))
+            
+            st.plotly_chart(to_plotly_tree(st.session_state.inquiry_tree), use_container_width=True)
+            eee_metrics = compute_eee(st.session_state.inquiry_tree, depth_limit=3, breadth_limit=5)
+            render_eee_explanation(eee_metrics)
+
+    with col_workbench:
+        st.subheader("Taller de Hipótesis (Usuario)", anchor=False)
+        st.info("Usa este taller para explorar tus propias hipótesis.")
+        # Lógica del taller de hipótesis aquí...
 
 def render_download_section(results):
-    pass # Pega aquí el código de esta función
+    st.subheader("Exportar Análisis Completo", divider="gray")
+    col1, col2 = st.columns(2)
+
+    with col1:
+        html_report = generate_html_report(
+            analysis_results=results, inquiry_tree=st.session_state.get("inquiry_tree")
+        )
+        st.download_button(
+            label="Descargar Informe en HTML",
+            data=html_report,
+            file_name=f"reporte_dea_{results.get('model_name', 'विश्लेषण').replace(' ', '_').lower()}.html",
+            mime="text/html", use_container_width=True
+        )
+
+    with col2:
+        excel_report = generate_excel_report(
+            analysis_results=results, inquiry_tree=st.session_state.get("inquiry_tree")
+        )
+        st.download_button(
+            label="Descargar Informe en Excel",
+            data=excel_report,
+            file_name=f"reporte_dea_{results.get('model_name', 'विश्लेषण').replace(' ', '_').lower()}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True
+        )
 
 def render_main_dashboard():
-    pass # Pega aquí el código de esta función
+    st.header("Paso 3: Configuración y Ejecución del Análisis", divider="blue")
+    st.markdown(f"**Enfoque seleccionado:** *{st.session_state.selected_proposal['title']}*")
+
+    model_options = {
+        "Radial (CCR/BCC)": "CCR_BCC",
+        "No Radial (SBM)": "SBM",
+        "Productividad (Malmquist)": "MALMQUIST"
+    }
+    model_name = st.selectbox("1. Selecciona el tipo de modelo DEA a aplicar:", list(model_options.keys()))
+    model_key = model_options[model_name]
+
+    period_col = None
+    if model_key == 'MALMQUIST':
+        period_col_options = [None] + st.session_state.df.columns.tolist()
+        period_col = st.selectbox("2. Selecciona la columna que identifica el período:", period_col_options, index=1)
+        if not period_col:
+            st.warning("El modelo Malmquist requiere una columna de período."); st.stop()
+
+    if st.button(f"Ejecutar Análisis con Modelo: {model_name}", type="primary", use_container_width=True):
+        with st.spinner(f"Ejecutando {model_name}..."):
+            df = st.session_state.df
+            proposal = st.session_state.selected_proposal
+            try:
+                st.session_state.dea_results = cached_run_dea_analysis(
+                    df, df.columns[0], proposal['inputs'], proposal['outputs'], model_key, period_col
+                )
+                st.session_state.app_status = "results_ready"
+            except Exception as e:
+                st.error(f"Error durante el análisis: {e}"); st.session_state.dea_results = None
+
+    if st.session_state.get("dea_results"):
+        results = st.session_state.dea_results
+        st.header(f"Resultados para: {results['model_name']}", divider="blue")
+        st.dataframe(results['main_df'])
+        
+        if results.get("charts"):
+            for chart_title, fig in results["charts"].items():
+                st.plotly_chart(fig, use_container_width=True)
+        
+        render_download_section(results)
+        render_deliberation_workshop(results)
 
 def render_validation_step():
-    pass # Pega aquí el código de esta función
+    st.header("Paso 2b: Validación del Modelo", divider="gray")
+    proposal = st.session_state.selected_proposal
+    
+    with st.spinner("La IA está validando la coherencia de los datos y el modelo..."):
+        validation_results = validate_data(st.session_state.df, proposal['inputs'], proposal['outputs'])
+
+    formal_issues = validation_results.get("formal_issues", [])
+    llm_results = validation_results.get("llm", {})
+
+    if formal_issues:
+        st.error("**Se encontraron problemas críticos en los datos que impiden el análisis:**")
+        for issue in formal_issues: st.markdown(f"- {issue}")
+        st.warning("Por favor, corrige tu fichero de datos y vuelve a cargarlo."); st.stop()
+    else:
+        st.success("¡Validación formal superada! Tus datos tienen el formato correcto.")
+
+    if llm_results.get("issues"):
+        st.warning("Consejos de la IA sobre tu selección de variables:")
+        for issue in llm_results["issues"]: st.markdown(f"- *{issue}*")
+        if llm_results.get("suggested_fixes"):
+            st.markdown("**Sugerencias de mejora:**")
+            for fix in llm_results["suggested_fixes"]: st.markdown(f"- *{fix}*")
+
+    if st.button("Proceder al Análisis"):
+        st.session_state.app_status = "validated"; st.rerun()
 
 def render_proposal_step():
     st.header("Paso 2: Elige un Enfoque de Análisis", divider="blue")
     if 'proposals' not in st.session_state:
-        with st.spinner("La IA está analizando tus datos..."):
+        with st.spinner("La IA está analizando tus datos para sugerir enfoques..."):
             st.session_state.proposals = cached_get_analysis_proposals(st.session_state.df).get("proposals", [])
+    
     if not st.session_state.get("proposals"):
-        st.error("La IA no pudo generar propuestas."); st.stop()
-    st.info("La IA ha preparado varios enfoques. Elige el que mejor se adapte a tu objetivo.")
+        st.error("La IA no pudo generar propuestas. Revisa el formato de tus datos."); st.stop()
+
+    st.info("La IA ha preparado varios enfoques para analizar tus datos. Elige el que mejor se adapte a tu objetivo.")
     for i, proposal in enumerate(st.session_state.get("proposals", [])):
         with st.expander(f"**Propuesta {i+1}: {proposal['title']}**", expanded=i==0):
             st.markdown(f"**Razonamiento:** *{proposal['reasoning']}*")
@@ -127,7 +266,13 @@ def render_proposal_step():
                 st.session_state.app_status = "proposal_selected"; st.rerun()
 
 def render_upload_step():
-    pass # Pega aquí el código de esta función
+    st.header("Paso 1: Carga tus Datos", divider="blue")
+    uploaded_file = st.file_uploader("Sube un fichero CSV", type=["csv"], on_change=initialize_state)
+    
+    if uploaded_file:
+        try: st.session_state.df = pd.read_csv(uploaded_file)
+        except Exception: uploaded_file.seek(0); st.session_state.df = pd.read_csv(uploaded_file, sep=';')
+        st.session_state.app_status = "file_loaded"; st.rerun()
 
 # --- 5) FLUJO PRINCIPAL DE LA APLICACIÓN ---
 def main():
@@ -135,7 +280,8 @@ def main():
     if st.sidebar.button("Empezar de Nuevo"):
         initialize_state(); st.rerun()
     st.sidebar.markdown("---")
-    st.sidebar.info("Análisis de eficiencia y deliberación estratégica con IA.")
+    st.sidebar.info("Una herramienta para el análisis de eficiencia y la deliberación estratégica con asistencia de IA.")
+
     if st.session_state.app_status == "initial": render_upload_step()
     elif st.session_state.app_status == "file_loaded": render_proposal_step()
     elif st.session_state.app_status == "proposal_selected": render_validation_step()
