@@ -13,37 +13,36 @@ def execute_analysis(
     inputs: list[str],
     outputs: list[str],
     model_key: str,
-    period_column: str = None # Nuevo parámetro para modelos de panel
+    period_column: str = None
 ) -> dict:
     """
     Ejecuta el análisis DEA seleccionado y devuelve un diccionario estandarizado con los resultados.
-    
-    Args:
-        model_key (str): Clave que identifica el modelo a ejecutar (ej: 'CCR_BCC', 'SBM', 'MALMQUIST').
-        period_column (str): Nombre de la columna de período, necesario para Malmquist.
-
-    Returns:
-        dict: Un diccionario con los resultados, incluyendo dataframes y figuras de plotly.
     """
     results = {"model_name": model_key, "main_df": pd.DataFrame(), "charts": {}}
-
-    # --- Lógica de Despacho ---
 
     if model_key == 'CCR_BCC':
         results["model_name"] = "Radial (CCR y BCC)"
         df_ccr = run_ccr(df, dmu_column, inputs, outputs)
-        # Para el histograma de CCR
-        df_ccr_hist = df_ccr.rename(columns={"tec_efficiency_ccr": "efficiency"})
+
+        # --- NUEVA VERIFICACIÓN DE ROBUSTEZ ---
+        # Antes de usar la columna, comprobamos que el cálculo de CCR la haya generado.
+        if 'tec_efficiency_ccr' not in df_ccr.columns:
+            raise ValueError(
+                "El cálculo del modelo CCR no produjo la columna de resultados esperada ('tec_efficiency_ccr'). "
+                "Esto puede deberse a un problema con la estructura de los datos de entrada que impide al solver encontrar una solución."
+            )
         
-        # El modelo BCC necesita los resultados de CCR para calcular la eficiencia de escala
+        # El resto del proceso continúa como antes
+        df_ccr_hist = df_ccr.rename(columns={"tec_efficiency_ccr": "efficiency"})
         df_bcc = run_bcc(df, dmu_column, inputs, outputs, df_ccr_results=df_ccr_hist)
         
-        # Unimos ambos resultados para una visualización consolidada
-        main_df = df_ccr.merge(
-            df_bcc[[dmu_column, 'efficiency', 'scale_efficiency', 'rts_label']],
-            on=dmu_column
-        )
-        main_df = main_df.rename(columns={"efficiency": "pure_efficiency_bcc"})
+        main_df = pd.DataFrame()
+        if not df_ccr.empty and not df_bcc.empty:
+            main_df = df_ccr.merge(
+                df_bcc[[dmu_column, 'efficiency', 'scale_efficiency', 'rts_label']],
+                on=dmu_column
+            )
+            main_df = main_df.rename(columns={"efficiency": "pure_efficiency_bcc"})
         
         results["main_df"] = main_df
         results["charts"]["hist_ccr"] = plot_efficiency_histogram(df_ccr_hist)
@@ -52,10 +51,11 @@ def execute_analysis(
 
     elif model_key == 'SBM':
         results["model_name"] = "No Radial (SBM)"
-        # El modelo SBM no orientado es una buena opción por defecto
         df_sbm = run_sbm(df, dmu_column, inputs, outputs, orientation="non-oriented")
+        if 'efficiency_sbm' not in df_sbm.columns:
+            raise ValueError("El cálculo del modelo SBM no produjo la columna de resultados esperada ('efficiency_sbm').")
+            
         df_sbm_hist = df_sbm.rename(columns={"efficiency_sbm": "efficiency"})
-
         results["main_df"] = df_sbm
         results["charts"]["hist_sbm"] = plot_efficiency_histogram(df_sbm_hist)
         return results
@@ -67,15 +67,13 @@ def execute_analysis(
             
         df_mpi = compute_malmquist_phi(df, dmu_column, period_column, inputs, outputs)
         results["main_df"] = df_mpi
-        # Podríamos añadir un gráfico de la evolución promedio del MPI
+        
         if not df_mpi.empty:
             avg_mpi = df_mpi.groupby('period_t1')[['MPI', 'efficiency_change', 'technical_change']].mean().reset_index()
             fig = px.line(avg_mpi, x='period_t1', y=['MPI', 'efficiency_change', 'technical_change'],
                           title="Evolución Promedio del Índice de Malmquist y sus Componentes")
             results["charts"]["mpi_evolution"] = fig
         return results
-    
-    # Se podrían añadir más modelos (Window, Network, etc.) aquí
     
     else:
         raise NotImplementedError(f"El modelo '{model_key}' no está implementado en el despachador.")
