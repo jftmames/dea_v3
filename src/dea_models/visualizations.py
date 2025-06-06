@@ -148,7 +148,10 @@ def plot_correlation(
     if var_x not in df_original.columns or var_y not in df_original.columns:
         return go.Figure().update_layout(title_text=f"Error: Una de las variables no existe.")
 
-    df_merged = df_results.merge(df_original[[dmu_col, var_x, var_y]], on=dmu_col, how="left")
+    df_merge_cols = [dmu_col, var_x]
+    if var_x != var_y:
+        df_merge_cols.append(var_y)
+    df_merged = df_results.merge(df_original[df_merge_cols], on=dmu_col, how="left")
     df_merged['Estatus'] = df_merged[efficiency_col].apply(lambda x: 'Eficiente' if x >= 0.999 else 'Ineficiente')
 
     fig = px.scatter(
