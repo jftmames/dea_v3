@@ -79,11 +79,13 @@ def render_deliberation_workshop(results):
         if st.button("Generar/Inspirar con nuevo Mapa de Razonamiento", use_container_width=True):
             with st.spinner("La IA está generando un mapa de ideas..."):
                 # El contexto puede variar según el modelo, aquí un ejemplo genérico
+                # Dentro de la función render_deliberation_workshop en main.py
                 context = {
                     "model": results.get("model_name"),
                     "inputs": st.session_state.selected_proposal['inputs'],
                     "outputs": st.session_state.selected_proposal['outputs'],
-                    "num_efficient_dmus": (results['main_df'].iloc[:, 1] >= 0.999).sum() if not results['main_df'].empty else 0
+                    # La corrección está en la siguiente línea, al añadir int()
+                    "num_efficient_dmus": int((results['main_df'].iloc[:, 1] >= 0.999).sum()) if not results['main_df'].empty else 0
                 }
                 root_question = f"Bajo el enfoque '{st.session_state.selected_proposal['title']}', ¿cuáles son las posibles causas de la ineficiencia observada?"
                 tree, error = cached_run_inquiry_engine(root_question, context)
