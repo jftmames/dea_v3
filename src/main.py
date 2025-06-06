@@ -10,6 +10,7 @@ from openai import OpenAI
 script_dir = os.path.dirname(__file__)
 if script_dir not in sys.path:
     sys.path.insert(0, script_dir)
+
 st.set_page_config(layout="wide", page_title="DEA Deliberativo con IA")
 
 # --- 1) IMPORTACIONES DE MÓDULOS ---
@@ -23,7 +24,7 @@ from openai_helpers import explain_inquiry_tree
 
 # --- 2) DEFINICIÓN DE TODAS LAS FUNCIONES ---
 
-# -- Funciones de IA y Caché --
+# -- Funciones de Caché (Definidas antes de ser llamadas) --
 @st.cache_data
 def cached_get_analysis_proposals(_df):
     return generate_analysis_proposals(_df.columns.tolist(), _df.head())
@@ -43,8 +44,10 @@ def cached_explain_tree(_tree):
 # -- Función de Gestión de Estado --
 def initialize_state():
     """Reinicia de forma segura el estado de la sesión Y LIMPIA LA CACHÉ."""
+    # Limpiar la caché de las funciones que dependen del DataFrame cargado
     cached_get_analysis_proposals.clear()
     cached_run_dea_analysis.clear()
+    # Restablecer las variables de estado de la sesión
     st.session_state.app_status = "initial"
     st.session_state.df = None
     st.session_state.proposals_data = None
@@ -54,8 +57,9 @@ def initialize_state():
     st.session_state.tree_explanation = None
     st.session_state.chart_to_show = None
 
-# -- Funciones de Lógica de IA (movidas aquí para evitar errores) --
+# -- Funciones de Lógica de IA --
 def get_openai_client():
+    """Inicializa de forma segura el cliente de OpenAI."""
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         st.error("La clave de API de OpenAI no ha sido configurada.")
@@ -64,6 +68,7 @@ def get_openai_client():
     return OpenAI(api_key=api_key)
 
 def chat_completion(prompt: str, use_json_mode: bool = False):
+    """Llamada genérica a OpenAI, con inicialización segura del cliente."""
     client = get_openai_client()
     params = {"model": "gpt-4o", "messages": [{"role": "user", "content": prompt}], "temperature": 0.5}
     if use_json_mode:
@@ -71,9 +76,13 @@ def chat_completion(prompt: str, use_json_mode: bool = False):
     return client.chat.completions.create(**params)
 
 def generate_analysis_proposals(df_columns: list[str], df_head: pd.DataFrame):
+    """Analiza columnas y propone modelos DEA."""
     prompt = (
-        "Eres un consultor experto en Data Envelopment Analysis (DEA)...\n" # Abreviado
-        "Devuelve únicamente un objeto JSON válido con una sola clave raíz 'proposals'..."
+        "Eres un consultor experto en Data Envelopment Analysis (DEA). Has recibido un conjunto de datos con las siguientes columnas: "
+        f"{df_columns}. A continuación se muestran las primeras filas:\n\n{df_head.to_string()}\n\n"
+        "Tu tarea es proponer entre 2 y 4 modelos de análisis DEA distintos y bien fundamentados que se podrían aplicar a estos datos. "
+        "Para cada propuesta, proporciona un título, un breve razonamiento sobre su utilidad y las listas de inputs y outputs sugeridas.\n\n"
+        "Devuelve únicamente un objeto JSON válido con una sola clave raíz 'proposals'. El valor de 'proposals' debe ser una lista de objetos, donde cada objeto representa una propuesta y contiene las claves 'title', 'reasoning', 'inputs' y 'outputs'."
     )
     content = "No se recibió contenido."
     try:
@@ -82,7 +91,6 @@ def generate_analysis_proposals(df_columns: list[str], df_head: pd.DataFrame):
         return json.loads(content)
     except Exception as e:
         return {"error": f"Error al procesar la respuesta de la IA: {str(e)}", "raw_content": content}
-
 
 # -- Componentes Modulares de la UI --
 def render_eee_explanation(eee_metrics: dict):
@@ -113,7 +121,7 @@ def render_deliberation_workshop(results):
                 if not main_df.empty and len(main_df.columns) > 1:
                     efficiency_col = main_df.columns[1]
                     num_efficient = int((main_df[efficiency_col] >= 0.999).sum())
-                context = {"model": results.get("model_name"),"inputs": st.session_state.selected_proposal['inputs'],"outputs": st.session_state.selected_proposal['outputs'],"num_efficient_dmus": num_efficient}
+                context = {"model": results.get("model_name"), "inputs": st.session_state.selected_proposal['inputs'], "outputs": st.session_state.selected_proposal['outputs'], "num_efficient_dmus": num_efficient}
                 root_question = f"Bajo el enfoque '{st.session_state.selected_proposal['title']}', ¿cuáles son las posibles causas de la ineficiencia observada?"
                 tree, error = cached_run_inquiry_engine(root_question, context)
                 if error: st.error(f"Error al generar el mapa: {error}")
@@ -136,10 +144,10 @@ def render_deliberation_workshop(results):
         if results.get("model_name") not in ["Índice de Productividad de Malmquist"]:
             all_vars = st.session_state.selected_proposal['inputs'] + st.session_state.selected_proposal['outputs']
             chart_type = st.selectbox("1. Elige un tipo de análisis:", ["Análisis de Distribución", "Análisis de Correlación"], key="wb_chart_type")
-            df_eff = results.get('main_df')
-            if df_eff is not None and not df_eff.empty:
-                efficiency_col_name = df_eff.columns[1]
-                df_eff_generic = df_eff.rename(columns={efficiency_col_name: "efficiency"})
+            df_results = results.get('main_df')
+            if df_results is not None and not df_results.empty:
+                efficiency_col_name = df_results.columns[1]
+                df_eff_generic = df_results.rename(columns={efficiency_col_name: "efficiency"})
                 if chart_type == "Análisis de Distribución":
                     var_dist = st.selectbox("2. Elige la variable a analizar:", all_vars, key="wb_var_dist")
                     if st.button("Generar Gráfico de Distribución"):
@@ -201,7 +209,7 @@ def render_validation_step():
     st.header("Paso 2b: Validación del Modelo", divider="gray")
     proposal = st.session_state.selected_proposal
     with st.spinner("La IA está validando la coherencia de los datos y el modelo..."):
-        validation_results = validate_data(st.session_state.df, proposal['inputs'], proposal['outputs'])
+        validation_results = validate_data(st.session_state.df, proposal.get('inputs', []), proposal.get('outputs', []))
     formal_issues = validation_results.get("formal_issues", [])
     llm_results = validation_results.get("llm", {})
     if formal_issues:
@@ -217,7 +225,34 @@ def render_validation_step():
             for fix in llm_results["suggested_fixes"]: st.markdown(f"- *{fix}*")
     if st.button("Proceder al Análisis"): st.session_state.app_status = "validated"; st.rerun()
 
-
+def render_proposal_step():
+    st.header("Paso 2: Elige un Enfoque de Análisis", divider="blue")
+    if not st.session_state.get('proposals_data'):
+        with st.spinner("La IA está analizando tus datos para sugerir enfoques..."):
+            st.session_state.proposals_data = cached_get_analysis_proposals(st.session_state.df)
+    proposals_data = st.session_state.proposals_data
+    if "error" in proposals_data:
+        st.error("La IA no pudo generar propuestas debido a un error.")
+        with st.expander("Ver detalles del error técnico"):
+            st.code(proposals_data["error"]); st.markdown("**Contenido recibido de la IA (si lo hubo):**"); st.code(proposals_data.get("raw_content", "N/A"))
+        st.stop()
+    proposals = proposals_data.get("proposals", [])
+    if not proposals:
+        st.error("La IA no devolvió ninguna propuesta válida."); st.json(proposals_data); st.stop()
+    st.info("La IA ha preparado varios enfoques para analizar tus datos. Elige el que mejor se adapte a tu objetivo.")
+    for i, proposal in enumerate(proposals):
+        title = proposal.get('title', f'Propuesta {i+1} (sin título)')
+        reasoning = proposal.get('reasoning', 'No se proporcionó un razonamiento.')
+        inputs = proposal.get('inputs', [])
+        outputs = proposal.get('outputs', [])
+        with st.expander(f"**{title}**", expanded=i==0):
+            st.markdown(f"**Razonamiento:** *{reasoning}*"); st.markdown(f"**Inputs sugeridos:** `{inputs}`"); st.markdown(f"**Outputs sugeridos:** `{outputs}`")
+            if st.button(f"Seleccionar: {title}", key=f"select_{i}"):
+                if inputs and outputs:
+                    st.session_state.selected_proposal = proposal
+                    st.session_state.app_status = "proposal_selected"; st.rerun()
+                else:
+                    st.error(f"La propuesta '{title}' está incompleta y no puede ser seleccionada. Por favor, elige otra.")
 
 def render_upload_step():
     st.header("Paso 1: Carga tus Datos", divider="blue")
@@ -226,53 +261,11 @@ def render_upload_step():
         try: st.session_state.df = pd.read_csv(uploaded_file)
         except Exception: uploaded_file.seek(0); st.session_state.df = pd.read_csv(uploaded_file, sep=';')
         st.session_state.app_status = "file_loaded"; st.rerun()
-def render_proposal_step():
-    """Renderiza la selección de propuestas con manejo de errores y claves opcionales."""
-    st.header("Paso 2: Elige un Enfoque de Análisis", divider="blue")
-    
-    if not st.session_state.get('proposals_data'):
-        with st.spinner("La IA está analizando tus datos para sugerir enfoques..."):
-            st.session_state.proposals_data = cached_get_analysis_proposals(st.session_state.df)
-    
-    proposals_data = st.session_state.proposals_data
-    
-    if "error" in proposals_data:
-        st.error("La IA no pudo generar propuestas debido a un error.")
-        with st.expander("Ver detalles del error técnico"):
-            st.code(proposals_data["error"])
-            st.markdown("**Contenido recibido de la IA (si lo hubo):**")
-            st.code(proposals_data.get("raw_content", "N/A"))
-        st.stop()
-    
-    proposals = proposals_data.get("proposals", [])
-    
-    if not proposals:
-        st.error("La IA no devolvió ninguna propuesta válida. Revisa el formato de tus datos o intenta de nuevo.")
-        with st.expander("Ver respuesta completa recibida de la IA"):
-            st.json(proposals_data)
-        st.stop()
-        
-    st.info("La IA ha preparado varios enfoques para analizar tus datos. Elige el que mejor se adapte a tu objetivo.")
-    for i, proposal in enumerate(proposals):
-        # --- CORRECCIÓN: Usamos .get() para manejar claves que puedan faltar ---
-        title = proposal.get('title', f'Propuesta {i+1} (sin título)')
-        reasoning = proposal.get('reasoning', 'No se proporcionó un razonamiento para esta propuesta.')
-        inputs = proposal.get('inputs', 'No especificados')
-        outputs = proposal.get('outputs', 'No especificados')
 
-        with st.expander(f"**{title}**", expanded=i==0):
-            st.markdown(f"**Razonamiento:** *{reasoning}*")
-            st.markdown(f"**Inputs sugeridos:** `{inputs}`")
-            st.markdown(f"**Outputs sugeridos:** `{outputs}`")
-            if st.button(f"Seleccionar: {title}", key=f"select_{i}"):
-                st.session_state.selected_proposal = proposal
-                st.session_state.app_status = "proposal_selected"
-                st.rerun()
 # --- 5) FLUJO PRINCIPAL DE LA APLICACIÓN ---
 def main():
     """Función principal que orquesta la aplicación."""
-    # CORRECCIÓN: La inicialización del estado se mueve aquí para asegurar
-    # que todas las funciones ya han sido definidas antes de ser llamadas.
+    # CORRECCIÓN: La inicialización del estado se mueve aquí.
     if 'app_status' not in st.session_state:
         initialize_state()
 
