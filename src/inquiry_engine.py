@@ -1,5 +1,5 @@
 # jftmames/-dea-deliberativo-mvp/src/inquiry_engine.py
-# --- VERSIÓN MEJORADA PARA MVP 1: DELIBERATIVE DEA MODELER ---
+# --- VERSIÓN CORREGIDA ---
 
 import os
 import json
@@ -20,36 +20,42 @@ except Exception as e:
 def to_plotly_tree(tree: Dict[str, Any], title: str = "Árbol de Auditoría Metodológica") -> go.Figure:
     """
     Convierte un diccionario anidado en un Treemap interactivo de Plotly.
-    Esta función es puramente para visualización y se mantiene sin cambios en su lógica.
     """
-    labels, parents = [], []
+    labels, parents, values = [], [], []
     if not tree or not isinstance(tree, dict):
         # Devuelve una figura vacía si el árbol no es válido.
         return go.Figure(layout={"title": "No hay datos para mostrar en el árbol."})
-    
+
     # El nodo raíz del árbol.
     root_label = list(tree.keys())[0]
-    labels.append(root_label)
-    parents.append("")
-
+    
+    # Función recursiva para recorrer el árbol y construir las listas de Plotly.
     def walk(node: Dict[str, Any], parent: str):
-        """Función recursiva para recorrer el árbol y construir las listas de Plotly."""
         for pregunta, hijos in node.items():
-            if parent != "" and pregunta not in labels:
+            if pregunta not in labels:
                 labels.append(pregunta)
                 parents.append(parent)
+                # Asignar un valor base para el tamaño del nodo
+                values.append(10) 
+            
             if isinstance(hijos, dict):
                 walk(hijos, pregunta)
             
-    walk(tree, root_label)
+    # La raíz no tiene padre en la visualización de Plotly
+    walk({root_label: tree[root_label]}, "")
     
     # Creación de la figura del Treemap.
     fig = go.Figure(go.Treemap(
         labels=labels,
         parents=parents,
+        values=values, # Añadimos valores para un mejor hoverinfo
         root_color="lightgrey",
-        textinfo="label+text",
-        hoverinfo="label+parent"
+        textinfo="label",
+        # --- CORRECCIÓN ---
+        # Se ha cambiado hoverinfo a una combinación válida.
+        # 'label' muestra el nombre del nodo.
+        # 'percent parent' muestra qué porcentaje representa del nodo padre.
+        hoverinfo="label+percent parent" 
     ))
     fig.update_layout(
         title_text=title,
@@ -65,7 +71,6 @@ def generate_inquiry(
 ) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """
     Genera un árbol de preguntas metodológicas usando el LLM en Modo JSON.
-    Esta es la función principal y ha sido completamente reorientada para el MVP 1.
     """
     if not client:
         # Si el cliente no se pudo inicializar, usa el árbol de respaldo.
@@ -73,9 +78,6 @@ def generate_inquiry(
 
     ctx_str = json.dumps(context, indent=2, ensure_ascii=False) if context else "{}"
     
-    # --- PROMPT MEJORADO Y ESPECIALIZADO ---
-    # El prompt ahora instruye a la IA para que actúe como un revisor académico,
-    # centrando las preguntas en la robustez y justificación del modelo DEA.
     prompt = (
         "Eres un catedrático de econometría y experto mundial en Análisis Envolvente de Datos (DEA), "
         "revisando una propuesta de investigación para una revista de primer nivel (Q1).\n"
@@ -95,35 +97,32 @@ def generate_inquiry(
 
     for attempt in range(max_retries + 1):
         if attempt > 0:
-            time.sleep(1)  # Espera exponencial para reintentos
+            time.sleep(1)
         
         try:
             resp = client.chat.completions.create(
                 model="gpt-4o",
                 messages=[{"role": "user", "content": prompt}],
                 response_format={"type": "json_object"},
-                temperature=0.3 + (attempt * 0.2),  # Aumenta la creatividad en cada reintento
+                temperature=0.3 + (attempt * 0.2),
             )
             
             response_json = json.loads(resp.choices[0].message.content)
             tree = response_json.get("tree", {})
             
-            if tree:  # Si el árbol tiene contenido, devuélvelo.
+            if tree:
                 return {root_question: tree}, None
 
         except Exception as e:
-            # Si todos los intentos fallan, devuelve el error final.
             if attempt >= max_retries:
                 return None, f"Fallo la conexión con la API tras {max_retries + 1} intentos. Detalle: {e}"
 
-    # Si la IA devuelve una estructura vacía o incorrecta, usa el árbol de respaldo.
     return _fallback_tree(root_question), "La IA no generó un árbol con la estructura esperada y se ha utilizado un mapa de respaldo."
 
 
 def _fallback_tree(root_q: str) -> Dict[str, Any]:
     """
     Árbol de respaldo si la llamada a la IA falla.
-    Ha sido actualizado para reflejar el enfoque metodológico.
     """
     return {
         root_q: {
