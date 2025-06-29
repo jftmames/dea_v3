@@ -33,7 +33,7 @@ from openai_helpers import explain_inquiry_tree
 
 def create_new_scenario(name: str = "Modelo Base", source_scenario_id: str = None):
     """Crea un nuevo escenario, ya sea en blanco o clonando uno existente."""
-    new_id = str(uuid.uuid4())
+    new_id = str(uuid.uniform(0, 1) * 1000000000) # Use a float for the key, as UUID is not always suitable for non-string IDs
     
     # Si se proporciona un escenario fuente, clónalo.
     if source_scenario_id and source_scenario_id in st.session_state.scenarios:
@@ -63,7 +63,8 @@ def create_new_scenario(name: str = "Modelo Base", source_scenario_id: str = Non
             "inquiry_tree": None,
             "tree_explanation": None,
             "chart_to_show": None,
-            "user_justifications": {} # Para guardar las justificaciones del usuario
+            "user_justifications": {}, # Para guardar las justificaciones del usuario
+            "data_overview": {} # Nuevo: para guardar el resumen de datos inicial
         }
     # Activa el escenario recién creado.
     st.session_state.active_scenario_id = new_id
@@ -270,7 +271,9 @@ def render_interactive_inquiry_tree(active_scenario):
         for question, children in node_dict.items():
             # Create a unique path for the current question
             # This path ensures the Streamlit key is unique across all text_areas
-            current_path = f"{path_prefix}__{question}" if path_prefix else question
+            # Convert question to a safe string for key
+            safe_question = "".join(c for c in question if c.isalnum() or c in [' ', '_', '-']).replace(' ', '_')[:50]
+            current_path = f"{path_prefix}__{safe_question}_{level}" if path_prefix else f"{safe_question}_{level}"
             
             st.markdown(f"<div style='margin-left: {level*20}px; border-left: 2px solid #ccc; padding-left: 10px; margin-top: 10px;'>"
                         f"<b>Pregunta de Auditoría:</b> {question}"
@@ -301,7 +304,8 @@ def render_deliberation_workshop(active_scenario):
     if not active_scenario.get('dea_results'): return
     
     st.header("Paso 4: Deliberación y Justificación Metodológica", divider="blue")
-    
+    st.info("Esta etapa es crucial para abordar los **retos metodológicos** del DEA. Utiliza el mapa de auditoría para documentar tu razonamiento y justificar las decisiones clave del análisis.")
+
     with st.container(border=True):
         st.subheader("Mapa de Auditoría (IA)", anchor=False)
         root_question_methodology = (
@@ -350,7 +354,7 @@ def render_optimization_workshop(active_scenario):
     if not active_scenario.get('dea_results'): return
     
     st.header("Paso 5: Optimización Asistida por IA", divider="blue")
-    st.info("La IA puede sugerir variaciones de los inputs/outputs o el modelo para buscar configuraciones potencialmente mejores. Selecciona un candidato y aplícalo para probarlo en un nuevo escenario.")
+    st.info("Esta sección te ayuda a mitigar la **sensibilidad del modelo** y explorar **diferentes aproximaciones** a tus datos. La IA puede sugerir variaciones de los inputs/outputs o el modelo para buscar configuraciones potencialmente mejores.")
 
     if active_scenario.get('selected_proposal') and active_scenario.get('dea_results'):
         current_inputs = active_scenario['selected_proposal']['inputs']
@@ -405,7 +409,7 @@ def render_optimization_workshop(active_scenario):
                     chosen_candidate = active_scenario['optimization_evaluations'].loc[selected_candidate_index]
                     
                     new_scenario_name = f"Optimizado - {active_scenario['name']} (Candidato {selected_candidate_index+1})"
-                    new_id = str(uuid.uuid4())
+                    new_id = str(uuid.uniform(0, 1) * 1000000000)
 
                     st.session_state.scenarios[new_id] = {
                         "name": new_scenario_name,
@@ -422,7 +426,8 @@ def render_optimization_workshop(active_scenario):
                         "dea_results": None,
                         "inquiry_tree": None,
                         "tree_explanation": None,
-                        "user_justifications": {}
+                        "user_justifications": {},
+                        "data_overview": active_scenario['data_overview'].copy() # Mantener la visión general de los datos
                     }
                     st.session_state.active_scenario_id = new_id
                     st.rerun()
@@ -446,14 +451,16 @@ def render_download_section(active_scenario):
         html_report = generate_html_report(
             analysis_results=results,
             inquiry_tree=active_scenario.get("inquiry_tree"),
-            user_justifications=active_scenario.get("user_justifications", {})
+            user_justifications=active_scenario.get("user_justifications", {}),
+            data_overview_info=active_scenario.get("data_overview", {})
         )
         st.download_button(label="Descargar Informe en HTML", data=html_report, file_name=f"report_{active_scenario['name'].replace(' ', '_')}.html", mime="text/html", use_container_width=True, key=f"html_dl_{st.session_state.active_scenario_id}")
     with col2:
         excel_report = generate_excel_report(
             analysis_results=results,
             inquiry_tree=active_scenario.get("inquiry_tree"),
-            user_justifications=active_scenario.get("user_justifications", {})
+            user_justifications=active_scenario.get("user_justifications", {}),
+            data_overview_info=active_scenario.get("data_overview", {})
         )
         st.download_button(label="Descargar Informe en Excel", data=excel_report, file_name=f"report_{active_scenario['name'].replace(' ', '_')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True, key=f"excel_dl_{st.session_state.active_scenario_id}")
 
@@ -503,10 +510,19 @@ def render_main_dashboard(active_scenario):
     current_model_key = active_scenario['dea_config'].get('model', 'CCR_BCC')
     current_model_name = [name for name, key in model_options.items() if key == current_model_key][0]
     
-    model_name = st.selectbox("1. Selecciona el tipo de modelo DEA:", list(model_options.keys()), index=list(model_options.values()).index(current_model_key), key=f"model_select_{st.session_state.active_scenario_id}")
+    model_name = st.selectbox(
+        "1. Selecciona el tipo de modelo DEA:", 
+        list(model_options.keys()), 
+        index=list(model_options.values()).index(current_model_key), 
+        key=f"model_select_{st.session_state.active_scenario_id}"
+    )
     model_key = model_options[model_name]
     
     active_scenario['dea_config']['model'] = model_key
+
+    # Información contextual sobre la elección del modelo
+    st.info(f"**Reto Metodológico: Elección del Modelo DEA.** La selección del modelo ({model_name}) y su orientación (ej. inputs vs. outputs, rendimientos a escala) es crucial. Afecta la forma de la frontera de eficiencia y las puntuaciones resultantes. Asegúrate de que esta elección sea coherente con la realidad operativa del proceso que estás analizando. Por ejemplo, el modelo radial (CCR/BCC) asume reducciones proporcionales de inputs, mientras que el no radial (SBM) aborda las holguras directamente.")
+
 
     period_col = None
     if model_key == 'MALMQUIST':
@@ -569,7 +585,7 @@ def render_validation_step(active_scenario):
         validation_results = validate_data(active_scenario['df'], proposal['inputs'], proposal['outputs'])
     
     if validation_results['formal_issues']:
-        st.error("Se encontraron problemas de validación formal en los datos o columnas seleccionadas:")
+        st.error("**Reto de Datos: Datos Problemáticos.** Se encontraron problemas de validación formal en los datos o columnas seleccionadas. El DEA requiere que los inputs y outputs sean positivos. La presencia de valores nulos, negativos o cero, o columnas no numéricas, puede causar errores o resultados inválidos.")
         for issue in validation_results['formal_issues']:
             st.warning(f"- {issue}")
         st.info("Por favor, regresa al Paso 2 para ajustar las columnas o los datos.")
@@ -578,7 +594,7 @@ def render_validation_step(active_scenario):
         st.success("La validación formal inicial de datos y columnas ha sido exitosa.")
     
     if validation_results['llm']['issues']:
-        st.info("La IA ha detectado posibles problemas conceptuales o sugerencias:")
+        st.info("**Reto de Datos: Idoneidad y Homogeneidad.** La IA ha detectado posibles problemas conceptuales o sugerencias sobre la idoneidad de las variables o la homogeneidad de las DMUs. Considera estas observaciones para asegurar que tus DMUs son verdaderamente comparables y que las variables capturan el proceso de producción de forma adecuada.")
         for issue in validation_results['llm']['issues']:
             st.warning(f"- {issue}")
         if validation_results['llm']['suggested_fixes']:
@@ -596,7 +612,8 @@ def render_validation_step(active_scenario):
 
 def render_proposal_step(active_scenario):
     st.header(f"Paso 2: Elige un Enfoque de Análisis para '{active_scenario['name']}'", divider="blue")
-    
+    st.info("**Reto de Datos: Selección de Insumos (Inputs) y Productos (Outputs).** La elección de las variables en DEA es crucial y puede ser subjetiva. Una selección inadecuada puede sesgar los resultados. Asegúrate de que tus inputs y outputs estén teóricamente justificados y sean relevantes para el proceso de eficiencia que deseas medir. Considera también la **homogeneidad de las DMUs**; solo deben compararse unidades que operen en entornos y con objetivos similares.")
+
     if not active_scenario.get('proposals_data'):
         with st.spinner("La IA está analizando tus datos para sugerir enfoques..."):
             active_scenario['proposals_data'] = cached_get_analysis_proposals(active_scenario['df'])
@@ -707,8 +724,123 @@ def render_upload_step():
             df = pd.read_csv(io.StringIO(uploaded_file.getvalue().decode('latin-1')), sep=';')
         
         st.session_state.global_df = df
+        
+        # Guardar un resumen de los datos para el reporte
+        data_overview = {
+            "shape": df.shape,
+            "column_types": df.dtypes.astype(str).to_dict(),
+            "numerical_summary": df.describe(include='number').to_dict(),
+            "null_counts": df.isnull().sum().to_dict(),
+            "non_numeric_issues": {}
+        }
+        
+        # Check for zeros/negatives in numerical columns
+        zero_neg_issues = {}
+        for col in df.select_dtypes(include='number').columns:
+            if (df[col] <= 0).any():
+                zero_neg_issues[col] = (df[col] <= 0).sum()
+        data_overview["zero_negative_counts"] = zero_neg_issues
+
+        # Check for non-numeric values in supposedly numeric columns (after initial load)
+        for col in df.columns:
+            if not pd.api.types.is_numeric_dtype(df[col]) and not df[col].isnull().all():
+                 # Check if the column contains non-numeric values, not just if it's already a numeric type
+                if pd.to_numeric(df[col], errors='coerce').isnull().any() and not df[col].isnull().all():
+                    data_overview["non_numeric_issues"][col] = True
+
+        st.session_state.scenarios[st.session_state.active_scenario_id]['data_overview'] = data_overview # Store in active scenario
+
         create_new_scenario(name="Modelo Base")
         st.rerun()
+    
+    if st.session_state.get('global_df') is not None:
+        active_scenario = get_active_scenario()
+        if active_scenario and active_scenario.get('data_overview'):
+            data_overview = active_scenario['data_overview']
+            
+            with st.expander("📊 Informe Rápido de los Datos Cargados"):
+                st.subheader("Dimensiones del DataFrame:")
+                st.write(f"Filas: {data_overview['shape'][0]}, Columnas: {data_overview['shape'][1]}")
+
+                st.subheader("Tipos de Datos por Columna:")
+                st.dataframe(pd.Series(data_overview['column_types']).rename("Tipo de Dato"))
+
+                st.subheader("Resumen Estadístico (Columnas Numéricas):")
+                st.dataframe(pd.DataFrame(data_overview['numerical_summary']))
+
+                st.subheader("Problemas Potenciales de Datos:")
+                issues_found = False
+
+                if any(data_overview['null_counts'].values()):
+                    st.warning("⛔ Valores Nulos Detectados:")
+                    st.dataframe(pd.Series(data_overview['null_counts'])[pd.Series(data_overview['null_counts']) > 0].rename("Cantidad de Nulos"))
+                    issues_found = True
+
+                if data_overview['non_numeric_issues']:
+                    st.error("❌ Columnas con Valores No Numéricos (Potenciales Errores):")
+                    for col in data_overview['non_numeric_issues']:
+                        st.write(f"- La columna '{col}' parece contener valores que no son números.")
+                    issues_found = True
+                
+                if data_overview['zero_negative_counts']:
+                    st.warning("⚠️ Columnas Numéricas con Ceros o Valores Negativos:")
+                    st.dataframe(pd.Series(data_overview['zero_negative_counts']).rename("Cantidad (Cero/Negativo)"))
+                    st.info("El DEA tradicionalmente requiere valores positivos. Estos datos necesitarán atención en los pasos de validación y modelo.")
+                    issues_found = True
+                
+                if not issues_found:
+                    st.success("✅ No se detectaron problemas obvios (nulos, no numéricos, ceros/negativos) en este informe rápido.")
+
+            st.markdown("---")
+            st.subheader("Guía para la Limpieza y Preparación de Datos")
+            st.info("""
+            Los **Retos de Datos** son uno de los principales desafíos en DEA. Para asegurar la validez de tu análisis, considera los siguientes puntos:
+            * **Manejo de Nulos:** Rellena o elimina filas con valores nulos antes de proceder.
+            * **Valores Positivos:** Asegúrate de que todos los inputs y outputs sean estrictamente positivos. Transforma o ajusta los ceros y negativos si aparecen en tus variables clave.
+            * **Outliers:** El DEA es sensible a los valores atípicos. Investiga y decide si los outliers deben ser eliminados o ajustados.
+            * **Homogeneidad:** Asegúrate de que las DMUs que comparas son realmente comparables. Factores contextuales o de tamaño pueden requerir segmentación o ajustes.
+            * **Tipo de Dato:** Confirma que todas las columnas que usarás como inputs/outputs sean numéricas.
+            
+            **Esta aplicación no realiza la limpieza de datos por ti.** Te recomendamos preparar tus datos en una herramienta externa (ej. Excel, Python con Pandas) antes de subirlos para un análisis DEA óptimo.
+            """)
+
+
+def render_dea_challenges_tab():
+    st.header("Retos Relevantes en el Uso del Análisis Envolvente de Datos (DEA)", divider="blue")
+    st.markdown("""
+    El Análisis Envolvente de Datos (DEA) es una herramienta potente, pero su aplicación exitosa depende de entender y abordar sus desafíos inherentes.
+    """)
+
+    st.subheader("1. Retos Relacionados con los Datos")
+    st.markdown("""
+    * **Selección de Insumos (Inputs) y Productos (Outputs):** Elegir las variables adecuadas es subjetivo y requiere justificación teórica. Una mala elección puede sesgar los resultados.
+        * **La aplicación ayuda:** En el **Paso 2**, la IA sugiere inputs/outputs y permite la edición manual para asegurar la relevancia.
+    * **Disponibilidad y Calidad de Datos:** Datos incompletos o erróneos pueden invalidar el análisis.
+    * **Número de Variables vs. DMUs:** Demasiadas variables para pocas DMUs pueden inflar artificialmente la eficiencia.
+    * **Valores Nulos, Negativos y Cero:** Los modelos DEA clásicos requieren datos positivos. Estos valores deben tratarse adecuadamente.
+        * **La aplicación ayuda:** En el **Paso 1**, se ofrece un informe rápido de los datos cargados y una guía de preparación. En el **Paso 2b**, se realizan validaciones formales para detectar y advertir sobre estos problemas antes del análisis.
+    * **Outliers (Valores Atípicos):** El DEA es sensible a los outliers, que pueden distorsionar la frontera de eficiencia.
+    * **Homogeneidad de las DMUs:** Las unidades analizadas deben ser comparables entre sí. Comparar entidades muy dispares lleva a conclusiones erróneas.
+        * **La aplicación ayuda:** En el **Paso 2**, se enfatiza la importancia de la homogeneidad, y la IA puede ofrecer sugerencias al respecto.
+    """)
+
+    st.subheader("2. Retos Metodológicos y de Especificación del Modelo")
+    st.markdown("""
+    * **Elección del Modelo DEA (CCR, BCC, SBM, etc.) y su Orientación:** La decisión sobre los rendimientos a escala (CRS vs. VRS) y la orientación (minimizar inputs vs. maximizar outputs) es crítica y afecta la forma de la frontera y las puntuaciones.
+        * **La aplicación ayuda:** En el **Paso 3**, se guía al usuario en la selección del modelo y se ofrece información contextual sobre las implicaciones de cada elección.
+    * **Falta de Pruebas de Significación Estadística:** El DEA no ofrece pruebas de significancia tradicionales, lo que dificulta generalizar los resultados.
+    * **Sensibilidad del Modelo:** Los resultados pueden ser muy sensibles a pequeñas variaciones en los datos o en la inclusión/exclusión de DMUs.
+        * **La aplicación ayuda:** En el **Paso 5**, la IA asiste en la exploración de configuraciones alternativas para evaluar la robustez del modelo.
+    """)
+
+    st.subheader("3. Retos de Interpretación y Aplicabilidad")
+    st.markdown("""
+    * **Interpretación de Puntuaciones de Eficiencia:** La eficiencia en DEA es *relativa* a la muestra, no absoluta.
+    * **Identificación de Benchmarks:** Replicar las "mejores prácticas" de los benchmarks puede ser difícil en la realidad.
+    * **Implicaciones de Política:** Traducir los resultados en acciones concretas requiere un profundo conocimiento del dominio.
+    * **Dimensionalidad de la Proyección:** Entender las proyecciones para DMUs ineficientes puede ser complejo.
+    * **La aplicación ayuda:** El **Paso 4 (Taller de Auditoría)** y los informes generados están diseñados para ayudar al investigador a deliberar, justificar y documentar la interpretación de los resultados, transformando el análisis cuantitativo en conocimiento accionable.
+    """)
 
 # --- 6) FLUJO PRINCIPAL DE LA APLICACIÓN (REFACTORIZADO) ---
 def main():
@@ -733,7 +865,7 @@ def main():
     if not active_scenario:
         render_upload_step()
     else:
-        analysis_tab, comparison_tab = st.tabs(["Análisis del Escenario Activo", "Comparar Escenarios"])
+        analysis_tab, comparison_tab, challenges_tab = st.tabs(["Análisis del Escenario Activo", "Comparar Escenarios", "Retos del DEA"])
 
         with analysis_tab:
             app_status = active_scenario.get('app_status', 'initial')
@@ -747,6 +879,11 @@ def main():
         
         with comparison_tab:
             render_comparison_view()
+        
+        with challenges_tab:
+            render_dea_challenges_tab()
 
 if __name__ == "__main__":
     main()
+
+
