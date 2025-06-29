@@ -24,6 +24,7 @@ from epistemic_metrics import compute_eee
 from data_validator import validate as validate_data
 from report_generator import generate_html_report, generate_excel_report
 from dea_models.visualizations import plot_hypothesis_distribution, plot_correlation
+from dea_models.auto_tuner import generate_candidates, evaluate_candidates # Nueva importación
 from openai_helpers import explain_inquiry_tree
 
 # --- 2) GESTIÓN DE ESTADO MULTI-ESCENARIO ---
@@ -39,6 +40,16 @@ def create_new_scenario(name: str = "Modelo Base", source_scenario_id: str = Non
         # Crea una copia profunda del diccionario del escenario fuente.
         st.session_state.scenarios[new_id] = st.session_state.scenarios[source_scenario_id].copy()
         st.session_state.scenarios[new_id]['name'] = f"Copia de {st.session_state.scenarios[source_scenario_id]['name']}"
+        # Asegurarse de que los resultados y el árbol sean "nuevos" en la copia si no son inmutables
+        if st.session_state.scenarios[new_id]['dea_results']:
+            st.session_state.scenarios[new_id]['dea_results'] = st.session_state.scenarios[source_scenario_id]['dea_results'].copy()
+        if st.session_state.scenarios[new_id]['inquiry_tree']:
+            st.session_state.scenarios[new_id]['inquiry_tree'] = st.session_state.scenarios[source_scenario_id]['inquiry_tree'].copy()
+        # Resetear justificaciones para que el usuario las rellene en el nuevo contexto si es un clon para ajuste
+        st.session_state.scenarios[new_id]['user_justifications'] = {} 
+        st.session_state.scenarios[new_id]['app_status'] = "file_loaded" # Revertir a la selección de propuesta
+        st.session_state.scenarios[new_id]['dea_results'] = None # Forzar re-ejecución
+        st.session_state.scenarios[new_id]['inquiry_tree'] = None # Forzar re-generación de árbol
     else:
         # Si no, crea un escenario virgen con valores por defecto.
         st.session_state.scenarios[new_id] = {
@@ -77,6 +88,8 @@ def reset_all():
     cached_run_dea_analysis.clear()
     cached_run_inquiry_engine.clear()
     cached_explain_tree.clear()
+    cached_generate_candidates.clear() # Limpiar caché de auto_tuner
+    cached_evaluate_candidates.clear() # Limpiar caché de auto_tuner
     initialize_global_state()
 
 
@@ -97,6 +110,15 @@ def cached_run_inquiry_engine(root_question, _context):
 @st.cache_data
 def cached_explain_tree(_tree):
     return explain_inquiry_tree(_tree)
+
+@st.cache_data
+def cached_generate_candidates(_df, dmu_col, input_cols, output_cols, inquiry_tree, eee_score):
+    return generate_candidates(_df, dmu_col, input_cols, output_cols, inquiry_tree, eee_score)
+
+@st.cache_data
+def cached_evaluate_candidates(_df, dmu_col, candidates, model):
+    return evaluate_candidates(_df, dmu_col, candidates, model)
+
 
 def get_openai_client():
     api_key = os.getenv("OPENAI_API_KEY")
@@ -207,8 +229,13 @@ def render_comparison_view():
             st.subheader(f"Resultados de: {sc['name']}")
             with st.container(border=True):
                 if sc.get('dea_results'):
-                    st.markdown("**Configuración:**"); st.json(sc.get('dea_config', {}))
-                    st.markdown("**Resultados (Top 5):**"); st.dataframe(sc['dea_results']['main_df'].head())
+                    st.markdown("**Configuración:**")
+                    st.json(sc.get('dea_config', {}))
+                    if sc.get('selected_proposal'):
+                        st.markdown(f"**Inputs:** {sc['selected_proposal'].get('inputs')}")
+                        st.markdown(f"**Outputs:** {sc['selected_proposal'].get('outputs')}")
+                    st.markdown("**Resultados (Top 5):**")
+                    st.dataframe(sc['dea_results']['main_df'].head())
                     if sc.get('inquiry_tree'):
                         eee_metrics = compute_eee(sc['inquiry_tree'], depth_limit=3, breadth_limit=5)
                         st.metric("Calidad del Juicio (EEE)", f"{eee_metrics['score']:.2%}")
@@ -227,8 +254,6 @@ def render_eee_explanation(eee_metrics: dict):
         - {interpret_score("Pluralidad (D2)", eee_metrics['D2'])}: Valora si se han considerado múltiples riesgos o facetas metodológicas.
         - {interpret_score("Robustez (D5)", eee_metrics['D5'])}: Evalúa la solidez y el detalle del árbol de preguntas.
         """)
-
-# --- 5) COMPONENTES DE LA UI MEJORADOS ---
 
 def render_interactive_inquiry_tree(active_scenario):
     """Muestra el árbol de preguntas y captura las justificaciones del usuario."""
@@ -273,7 +298,7 @@ def render_deliberation_workshop(active_scenario):
     with st.container(border=True):
         st.subheader("Mapa de Auditoría (IA)", anchor=False)
         root_question_methodology = (
-            f"Para un modelo DEA con enfoque '{active_scenario['selected_proposal']['title']}', "
+            f"Para un modelo DEA con enfoque '{active_scenario['selected_proposal'].get('title', 'N/A')}', "
             f"inputs {active_scenario['selected_proposal']['inputs']} y "
             f"outputs {active_scenario['selected_proposal']['outputs']}, "
             "¿cuáles son los principales desafíos metodológicos y las mejores prácticas para asegurar la robustez del análisis?"
@@ -294,7 +319,18 @@ def render_deliberation_workshop(active_scenario):
         if active_scenario.get("inquiry_tree"):
             with st.expander("Ver visualización del árbol y explicación de la IA"):
                 st.plotly_chart(to_plotly_tree(active_scenario['inquiry_tree']), use_container_width=True)
-                # ... Lógica para explicación de la IA ...
+                if st.button("Generar Explicación del Mapa por IA", key=f"explain_tree_{st.session_state.active_scenario_id}"):
+                    with st.spinner("La IA está redactando la explicación..."):
+                        explanation_data = cached_explain_tree(active_scenario['inquiry_tree'])
+                        if explanation_data.get("error"):
+                            st.error(f"Error al generar explicación: {explanation_data['error']}")
+                        else:
+                            active_scenario['tree_explanation'] = explanation_data['text']
+                if active_scenario.get('tree_explanation'):
+                    st.markdown("---")
+                    st.subheader("Explicación del Mapa (Generada por IA)")
+                    st.markdown(active_scenario['tree_explanation'])
+            
             eee_metrics = compute_eee(active_scenario['inquiry_tree'], depth_limit=3, breadth_limit=5)
             render_eee_explanation(eee_metrics)
 
@@ -303,9 +339,95 @@ def render_deliberation_workshop(active_scenario):
     # Nuevo componente interactivo para las justificaciones
     render_interactive_inquiry_tree(active_scenario)
 
+def render_optimization_workshop(active_scenario):
+    if not active_scenario.get('dea_results'): return
+    
+    st.header("Paso 5: Optimización Asistida por IA", divider="blue")
+    st.info("La IA puede sugerir variaciones de los inputs/outputs o el modelo para buscar configuraciones potencialmente mejores. Selecciona un candidato y aplícalo para probarlo en un nuevo escenario.")
+
+    if active_scenario.get('selected_proposal') and active_scenario.get('dea_results'):
+        current_inputs = active_scenario['selected_proposal']['inputs']
+        current_outputs = active_scenario['selected_proposal']['outputs']
+        current_model = active_scenario['dea_config'].get('model', 'CCR_BCC') # Usar el modelo actual
+        
+        # Necesitamos el EEE Score del escenario actual para el generate_candidates
+        eee_score = 0.5 # Placeholder, el auto_tuner actual no lo usa inteligentemente
+        if active_scenario.get('inquiry_tree'):
+            eee_metrics = compute_eee(active_scenario['inquiry_tree'], depth_limit=3, breadth_limit=5)
+            eee_score = eee_metrics['score']
+            
+        st.subheader("Generar Candidatos de Configuración")
+        if st.button("Sugerir Configuraciones Alternativas", key=f"gen_candidates_{st.session_state.active_scenario_id}"):
+            with st.spinner("La IA está generando candidatos..."):
+                candidates = cached_generate_candidates(
+                    active_scenario['df'],
+                    active_scenario['df'].columns[0],
+                    current_inputs,
+                    current_outputs,
+                    active_scenario['inquiry_tree'], # Se pasa el árbol
+                    eee_score
+                )
+                active_scenario['optimization_candidates'] = candidates
+                # Limpiar evaluaciones previas
+                active_scenario['optimization_evaluations'] = None
+        
+        if active_scenario.get('optimization_candidates'):
+            st.subheader("Evaluar Candidatos")
+            if st.button("Evaluar Candidatos Sugeridos", key=f"eval_candidates_{st.session_state.active_scenario_id}"):
+                with st.spinner("Evaluando candidatos..."):
+                    evaluations = cached_evaluate_candidates(
+                        active_scenario['df'],
+                        active_scenario['df'].columns[0],
+                        active_scenario['optimization_candidates'],
+                        current_model
+                    )
+                    active_scenario['optimization_evaluations'] = evaluations
+            
+            if active_scenario.get('optimization_evaluations') is not None:
+                st.subheader("Resultados de la Evaluación de Candidatos")
+                st.dataframe(active_scenario['optimization_evaluations'])
+
+                selected_candidate_index = st.selectbox(
+                    "Selecciona un candidato para aplicar:",
+                    options=range(len(active_scenario['optimization_evaluations'])),
+                    format_func=lambda idx: f"Candidato {idx+1}: I={active_scenario['optimization_evaluations'].loc[idx, 'inputs']}, O={active_scenario['optimization_evaluations'].loc[idx, 'outputs']}",
+                    key=f"select_opt_cand_{st.session_state.active_scenario_id}"
+                )
+
+                if st.button("Aplicar Configuración Seleccionada (Crea Nuevo Escenario)", key=f"apply_opt_cand_{st.session_state.active_scenario_id}"):
+                    chosen_candidate = active_scenario['optimization_evaluations'].loc[selected_candidate_index]
+                    
+                    new_scenario_name = f"Optimizado - {active_scenario['name']} (Candidato {selected_candidate_index+1})"
+                    new_id = str(uuid.uuid4())
+
+                    st.session_state.scenarios[new_id] = {
+                        "name": new_scenario_name,
+                        "df": active_scenario['df'],
+                        "app_status": "proposal_selected", # Ir directamente a validación
+                        "proposals_data": None, # No necesitamos propuestas de IA de nuevo
+                        "selected_proposal": { # Directamente la propuesta optimizada
+                            "title": f"Configuración Optimizada de {active_scenario['name']}",
+                            "reasoning": "Configuración sugerida por la IA durante la fase de optimización.",
+                            "inputs": chosen_candidate['inputs'],
+                            "outputs": chosen_candidate['outputs']
+                        },
+                        "dea_config": active_scenario['dea_config'].copy(), # Copiar config del modelo (e.g. CCR/BCC)
+                        "dea_results": None,
+                        "inquiry_tree": None,
+                        "tree_explanation": None,
+                        "user_justifications": {}
+                    }
+                    st.session_state.active_scenario_id = new_id
+                    st.rerun()
+            else:
+                st.info("Haz clic en 'Evaluar Candidatos Sugeridos' para ver los resultados.")
+        else:
+            st.info("Haz clic en 'Sugerir Configuraciones Alternativas' para que la IA proponga nuevos modelos.")
+    else:
+        st.warning("Necesitas haber ejecutado un análisis DEA base (Paso 3) para usar esta sección.")
+
+
 def render_download_section(active_scenario):
-    # (Esta función se usará en el siguiente paso para generar el informe con las justificaciones)
-    # Por ahora, se mantiene sin cambios.
     results = active_scenario.get('dea_results')
     if not results: return
 
@@ -313,19 +435,61 @@ def render_download_section(active_scenario):
     st.markdown(f"Descarga los resultados y el informe deliberativo para el escenario **'{active_scenario['name']}'**.")
     col1, col2 = st.columns(2)
     with col1:
-        # Aquí se pasará user_justifications en el futuro
-        html_report = generate_html_report(analysis_results=results, inquiry_tree=active_scenario.get("inquiry_tree"))
+        # Aquí se pasa user_justifications al generador de reportes
+        html_report = generate_html_report(
+            analysis_results=results,
+            inquiry_tree=active_scenario.get("inquiry_tree"),
+            user_justifications=active_scenario.get("user_justifications", {})
+        )
         st.download_button(label="Descargar Informe en HTML", data=html_report, file_name=f"report_{active_scenario['name'].replace(' ', '_')}.html", mime="text/html", use_container_width=True, key=f"html_dl_{st.session_state.active_scenario_id}")
     with col2:
-        excel_report = generate_excel_report(analysis_results=results, inquiry_tree=active_scenario.get("inquiry_tree"))
+        excel_report = generate_excel_report(
+            analysis_results=results,
+            inquiry_tree=active_scenario.get("inquiry_tree"),
+            user_justifications=active_scenario.get("user_justifications", {})
+        )
         st.download_button(label="Descargar Informe en Excel", data=excel_report, file_name=f"report_{active_scenario['name'].replace(' ', '_')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True, key=f"excel_dl_{st.session_state.active_scenario_id}")
 
 
 def render_main_dashboard(active_scenario):
-    # (El resto de funciones de renderizado se mantienen, operando sobre `active_scenario`)
     st.header(f"Paso 3: Configuración y Análisis para '{active_scenario['name']}'", divider="blue")
-    st.markdown(f"**Enfoque seleccionado:** *{active_scenario['selected_proposal'].get('title', 'N/A')}*")
     
+    # Mostrar inputs y outputs seleccionados y permitir edición directa
+    st.markdown("---")
+    st.subheader("Configuración Actual de Inputs y Outputs:")
+    col_inputs, col_outputs = st.columns(2)
+    with col_inputs:
+        all_cols = active_scenario['df'].columns.tolist()
+        # Asegurarse de que el dmu_column no sea seleccionable como input/output
+        available_cols = [col for col in all_cols if col != active_scenario['df'].columns[0]] 
+        
+        current_inputs = active_scenario['selected_proposal'].get('inputs', [])
+        current_outputs = active_scenario['selected_proposal'].get('outputs', [])
+
+        st.markdown("**Inputs Seleccionados:**")
+        selected_inputs = st.multiselect(
+            "Selecciona o edita los inputs:",
+            options=available_cols,
+            default=current_inputs,
+            key=f"manual_inputs_{st.session_state.active_scenario_id}"
+        )
+        # Actualizar la propuesta seleccionada en el estado del escenario
+        active_scenario['selected_proposal']['inputs'] = selected_inputs
+    
+    with col_outputs:
+        st.markdown("**Outputs Seleccionados:**")
+        selected_outputs = st.multiselect(
+            "Selecciona o edita los outputs:",
+            options=available_cols,
+            default=current_outputs,
+            key=f"manual_outputs_{st.session_state.active_scenario_id}"
+        )
+        # Actualizar la propuesta seleccionada en el estado del escenario
+        active_scenario['selected_proposal']['outputs'] = selected_outputs
+
+    st.markdown("---")
+
+
     model_options = {"Radial (CCR/BCC)": "CCR_BCC", "No Radial (SBM)": "SBM", "Productividad (Malmquist)": "MALMQUIST"}
     
     # Recuperar la selección actual del estado o usar un valor por defecto
@@ -339,15 +503,26 @@ def render_main_dashboard(active_scenario):
 
     period_col = None
     if model_key == 'MALMQUIST':
-        period_col_options = [None] + active_scenario['df'].columns.tolist()
-        period_col = st.selectbox("2. Selecciona la columna de período:", period_col_options, index=1, key=f"period_col_{st.session_state.active_scenario_id}")
+        period_col_options = [None] + [col for col in active_scenario['df'].columns.tolist() if col != active_scenario['df'].columns[0]]
+        current_period_col = active_scenario['dea_config'].get('period_col', None)
+        period_col_index = period_col_options.index(current_period_col) if current_period_col in period_col_options else 0
+        period_col = st.selectbox("2. Selecciona la columna de período:", period_col_options, index=period_col_index, key=f"period_col_{st.session_state.active_scenario_id}")
         if not period_col: st.warning("El modelo Malmquist requiere una columna de período."); st.stop()
         active_scenario['dea_config']['period_col'] = period_col
     
-    if st.button(f"Ejecutar Análisis", type="primary", use_container_width=True, key=f"run_{st.session_state.active_scenario_id}"):
+    if st.button(f"Ejecutar Análisis DEA para '{active_scenario['name']}'", type="primary", use_container_width=True, key=f"run_{st.session_state.active_scenario_id}"):
         with st.spinner(f"Ejecutando {model_name} para '{active_scenario['name']}'..."):
             df = active_scenario['df']
             proposal = active_scenario['selected_proposal']
+            
+            # Validar antes de ejecutar
+            validation_results = validate_data(df, proposal.get('inputs', []), proposal.get('outputs', []))
+            if validation_results['formal_issues']:
+                for issue in validation_results['formal_issues']:
+                    st.error(f"Error de validación formal: {issue}")
+                st.warning("Por favor, corrige los errores de validación antes de ejecutar el análisis.")
+                return # Detener la ejecución si hay errores formales
+
             try:
                 results = cached_run_dea_analysis(df, df.columns[0], proposal.get('inputs', []), proposal.get('outputs', []), model_key, period_col)
                 active_scenario['dea_results'] = results
@@ -355,7 +530,7 @@ def render_main_dashboard(active_scenario):
             except Exception as e:
                 st.error(f"Error durante el análisis: {e}")
                 active_scenario['dea_results'] = None
-        st.rerun()
+        st.rerun() # Rerun para mostrar los resultados
 
     if active_scenario.get("dea_results"):
         results = active_scenario["dea_results"]
@@ -365,27 +540,54 @@ def render_main_dashboard(active_scenario):
             for chart_title, fig in results["charts"].items():
                 st.plotly_chart(fig, use_container_width=True)
         
-        # El taller de deliberación y la descarga se muestran aquí
+        # El taller de deliberación, optimización y la descarga se muestran aquí
         render_deliberation_workshop(active_scenario)
+        render_optimization_workshop(active_scenario)
         render_download_section(active_scenario)
 
 def render_validation_step(active_scenario):
-    #... (sin cambios importantes)
     st.header(f"Paso 2b: Validación del Modelo para '{active_scenario['name']}'", divider="gray")
     proposal = active_scenario.get('selected_proposal')
+    
     if not proposal or not proposal.get('inputs') or not proposal.get('outputs'):
         st.error("La propuesta de análisis de este escenario está incompleta. Por favor, vuelve al paso anterior o elige otro escenario.")
         return
+    
+    st.markdown(f"**Propuesta Seleccionada:** *{proposal.get('title', 'Configuración Manual')}*")
+    st.markdown(f"**Inputs:** {proposal.get('inputs', [])}")
+    st.markdown(f"**Outputs:** {proposal.get('outputs', [])}")
+    st.markdown(f"**Razonamiento:** {proposal.get('reasoning', 'Configuración definida por el usuario o sugerida por la IA.')}")
 
     with st.spinner("La IA está validando la coherencia de los datos y el modelo..."):
         validation_results = validate_data(active_scenario['df'], proposal['inputs'], proposal['outputs'])
     
-    if st.button("Proceder al Análisis", key=f"validate_{st.session_state.active_scenario_id}"):
-        active_scenario['app_status'] = "validated"
-        st.rerun()
+    if validation_results['formal_issues']:
+        st.error("Se encontraron problemas de validación formal en los datos o columnas seleccionadas:")
+        for issue in validation_results['formal_issues']:
+            st.warning(f"- {issue}")
+        st.info("Por favor, regresa al Paso 2 para ajustar las columnas o los datos.")
+        # El botón de proceder no debería aparecer si hay errores formales
+    else:
+        st.success("La validación formal inicial de datos y columnas ha sido exitosa.")
+    
+    if validation_results['llm']['issues']:
+        st.info("La IA ha detectado posibles problemas conceptuales o sugerencias:")
+        for issue in validation_results['llm']['issues']:
+            st.warning(f"- {issue}")
+        if validation_results['llm']['suggested_fixes']:
+            st.markdown("**Sugerencias de la IA para mejorar:**")
+            for fix in validation_results['llm']['suggested_fixes']:
+                st.info(f"- {fix}")
+
+    if not validation_results['formal_issues']: # Solo permitir proceder si no hay errores formales
+        if st.button("Proceder al Análisis", key=f"validate_{st.session_state.active_scenario_id}", type="primary", use_container_width=True):
+            active_scenario['app_status'] = "validated"
+            st.rerun()
+    else:
+        st.warning("Por favor, resuelve los problemas de validación formal antes de proceder.")
+
 
 def render_proposal_step(active_scenario):
-    #... (sin cambios importantes)
     st.header(f"Paso 2: Elige un Enfoque de Análisis para '{active_scenario['name']}'", divider="blue")
     
     if not active_scenario.get('proposals_data'):
@@ -394,17 +596,97 @@ def render_proposal_step(active_scenario):
     
     proposals_data = active_scenario['proposals_data']
     proposals = proposals_data.get("proposals", [])
-    st.info("La IA ha preparado varios enfoques. Elige uno para este escenario.")
-    for i, proposal in enumerate(proposals):
-        with st.expander(f"**{proposal.get('title', 'N/A')}**"):
-            st.markdown(f"_{proposal.get('reasoning', '')}_")
-            if st.button(f"Seleccionar", key=f"select_{i}_{st.session_state.active_scenario_id}"):
-                if proposal.get('inputs') and proposal.get('outputs'):
-                    active_scenario['selected_proposal'] = proposal
-                    active_scenario['app_status'] = "proposal_selected"
-                    st.rerun()
-                else:
-                    st.error("Propuesta incompleta.")
+    
+    if proposals_data.get("error"):
+        st.error(f"Error al generar propuestas de la IA: {proposals_data['error']}. Contenido crudo: {proposals_data.get('raw_content', 'N/A')}")
+        st.warning("Procediendo a la configuración manual de inputs y outputs.")
+        selected_option = "Configuración Manual"
+    else:
+        st.info("La IA ha preparado varios enfoques. Elige uno o configura manualmente.")
+        options_list = ["Configuración Manual"] + [prop.get('title', f"Propuesta {i+1}") for i, prop in enumerate(proposals)]
+        selected_option = st.selectbox(
+            "Selecciona una opción:",
+            options=options_list,
+            key=f"proposal_selection_{st.session_state.active_scenario_id}"
+        )
+
+    st.markdown("---")
+
+    col_df_info, col_manual_config = st.columns([1, 2])
+
+    with col_df_info:
+        st.subheader("Datos Cargados:")
+        st.dataframe(active_scenario['df'].head())
+        st.markdown(f"**Columnas disponibles:** {', '.join(active_scenario['df'].columns.tolist())}")
+        st.markdown(f"**Número de DMUs:** {len(active_scenario['df'])}")
+
+    with col_manual_config:
+        st.subheader("Detalles de la Propuesta:")
+        selected_inputs = []
+        selected_outputs = []
+        proposal_title = ""
+        proposal_reasoning = ""
+        
+        all_cols_for_selection = [col for col in active_scenario['df'].columns.tolist() if col != active_scenario['df'].columns[0]]
+
+        if selected_option == "Configuración Manual":
+            proposal_title = "Configuración Manual del Modelo"
+            proposal_reasoning = "El usuario ha definido las variables de forma personalizada."
+            st.markdown("Define tus propios inputs y outputs.")
+            
+            selected_inputs = st.multiselect(
+                "Selecciona las columnas de **Inputs**:",
+                options=all_cols_for_selection,
+                default=[],
+                key=f"manual_inputs_initial_{st.session_state.active_scenario_id}"
+            )
+            selected_outputs = st.multiselect(
+                "Selecciona las columnas de **Outputs**:",
+                options=all_cols_for_selection,
+                default=[],
+                key=f"manual_outputs_initial_{st.session_state.active_scenario_id}"
+            )
+
+        else:
+            # Encuentra la propuesta seleccionada por título
+            selected_ai_proposal = next((p for p in proposals if p.get('title') == selected_option), None)
+            if selected_ai_proposal:
+                proposal_title = selected_ai_proposal.get('title', '')
+                proposal_reasoning = selected_ai_proposal.get('reasoning', '')
+                selected_inputs = selected_ai_proposal.get('inputs', [])
+                selected_outputs = selected_ai_proposal.get('outputs', [])
+
+                st.markdown(f"**Título:** {proposal_title}")
+                st.markdown(f"**Razonamiento:** {proposal_reasoning}")
+                
+                st.markdown("Puedes ajustar las variables sugeridas por la IA:")
+                selected_inputs = st.multiselect(
+                    "Inputs sugeridos (ajustables):",
+                    options=all_cols_for_selection,
+                    default=selected_inputs,
+                    key=f"ai_inputs_adjustable_{st.session_state.active_scenario_id}"
+                )
+                selected_outputs = st.multiselect(
+                    "Outputs sugeridos (ajustables):",
+                    options=all_cols_for_selection,
+                    default=selected_outputs,
+                    key=f"ai_outputs_adjustable_{st.session_state.active_scenario_id}"
+                )
+            else:
+                st.warning("Propuesta no encontrada.")
+
+        if st.button("Confirmar y Validar Configuración", type="primary", use_container_width=True, key=f"confirm_proposal_{st.session_state.active_scenario_id}"):
+            if not selected_inputs or not selected_outputs:
+                st.error("Debes seleccionar al menos un input y un output.")
+            else:
+                active_scenario['selected_proposal'] = {
+                    "title": proposal_title,
+                    "reasoning": proposal_reasoning,
+                    "inputs": selected_inputs,
+                    "outputs": selected_outputs
+                }
+                active_scenario['app_status'] = "proposal_selected"
+                st.rerun()
 
 def render_upload_step():
     st.header("Paso 1: Carga tus Datos para Iniciar la Sesión", divider="blue")
@@ -453,6 +735,7 @@ def main():
             elif app_status == "proposal_selected":
                 render_validation_step(active_scenario)
             elif app_status in ["validated", "results_ready"]:
+                # render_main_dashboard maneja los pasos 3, 4, 5 y la descarga
                 render_main_dashboard(active_scenario)
         
         with comparison_tab:
@@ -460,3 +743,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
