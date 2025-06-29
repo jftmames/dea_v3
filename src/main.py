@@ -9,6 +9,7 @@ import openai
 import plotly.express as px 
 
 # --- 0) AJUSTE DEL PYTHONPATH Y CONFIGURACIÓN INICIAL ---
+# Asegura que los módulos locales se puedan importar correctamente.
 script_dir = os.path.dirname(__file__)
 if script_dir not in sys.path:
     sys.path.insert(0, script_dir)
@@ -163,8 +164,8 @@ def generate_analysis_proposals(df_columns: list[str], df_head: pd.DataFrame):
 
 
 # --- FUNCIONES DE RENDERIZADO DE LA UI ---
-# TODAS las funciones de renderizado se definen AQUÍ, antes del bloque principal de ejecución.
-# Esto es CRÍTICO para resolver los NameError.
+# TODAS las funciones de renderizado se definen AQUÍ.
+# Este es el orden CRÍTICO para evitar NameError en Streamlit.
 
 def render_scenario_navigator():
     st.sidebar.title("Navegador de Escenarios")
@@ -590,7 +591,7 @@ def render_main_dashboard(active_scenario):
                 return 
             
             try:
-                results = cached_run_dea_analysis(df, df.columns[0], proposal.get('inputs', []), proposal.get('outputs', []), model_key, period_col)
+                results = cached_run_dea_analysis(df, df.columns[0], proposal.get('inputs', [], ), proposal.get('outputs', []), model_key, period_col)
                 active_scenario['dea_results'] = results
                 active_scenario['app_status'] = "results_ready"
             except Exception as e:
@@ -877,7 +878,10 @@ def render_dea_challenges_tab():
     * **La aplicación ayuda:** El **Paso 4 (Taller de Auditoría)** y los informes generados están diseñados para ayudar al investigador a deliberar, justificar y documentar la interpretación de los resultados, transformando el análisis cuantitativo en conocimiento accionable.
     """)
 
+
 # --- FUNCIÓN PRINCIPAL DE LA APLICACIÓN ---
+# La función main() orquesta el flujo general de la aplicación.
+# Todas las funciones de renderizado deben estar definidas antes de esta.
 def main():
     """Función principal que orquesta la aplicación multi-escenario."""
     initialize_global_state() 
