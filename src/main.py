@@ -634,7 +634,7 @@ class AppRenderer:
 
         st.subheader("1. Estadísticas Descriptivas:", anchor=False)
         st.markdown("Un resumen rápido de las características centrales, dispersión y forma de tus datos numéricos.")
-        st.dataframe(df[numerical_cols].describe().T, help="Estadísticas descriptivas para todas las columnas numéricas: conteo, media, desviación estándar, valores mínimos y máximos, y cuartiles. Esto te da una primera idea de la distribución de tus variables.")
+        st.dataframe(df[numerical_cols].describe().T)
 
         st.subheader("2. Distribución de Variables (Histogramas):", anchor=False)
         st.markdown("Visualiza la distribución de cada variable numérica. Esto te ayuda a identificar asimetrías, rangos de valores y la presencia de posibles outliers.")
