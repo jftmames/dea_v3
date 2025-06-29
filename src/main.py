@@ -635,10 +635,16 @@ def render_preliminary_analysis_step(active_scenario):
         return
 
     # Store charts in data_overview for reporting
+    # No es necesario re-calcular si ya están en el caché del escenario
     if 'preliminary_analysis_charts' not in active_scenario['data_overview']:
         active_scenario['data_overview']['preliminary_analysis_charts'] = {}
-    if 'correlation_matrix' not in active_scenario['data_overview']:
-        active_scenario['data_overview']['correlation_matrix'] = df[numerical_cols].corr().to_dict() # Store as dict for JSON serializability
+    
+    # Recalcular la matriz de correlación si no existe o si se ha actualizado el DF global
+    if 'correlation_matrix' not in active_scenario['data_overview'] or \
+       active_scenario['data_overview'].get('last_df_hash') != hash(df.to_numpy().tobytes()): # Simple hash check
+        active_scenario['data_overview']['correlation_matrix'] = df[numerical_cols].corr().to_dict()
+        active_scenario['data_overview']['last_df_hash'] = hash(df.to_numpy().tobytes())
+
 
     st.subheader("1. Estadísticas Descriptivas:", anchor=False)
     st.markdown("Un resumen rápido de las características centrales, dispersión y forma de tus datos numéricos.")
@@ -655,21 +661,27 @@ def render_preliminary_analysis_step(active_scenario):
                            labels={col: col}, 
                            template="plotly_white")
         st.plotly_chart(fig, use_container_width=True, key=f"hist_{col}_{st.session_state.active_scenario_id}", help=f"Histograma de la columna '{col}'. Observa la forma de la distribución, si es simétrica, sesgada, o si hay valores atípicos.")
+        # Guardar la figura como JSON para el reporte
         active_scenario['data_overview']['preliminary_analysis_charts']['histograms'][col] = fig.to_json()
 
 
     st.subheader("3. Matriz de Correlación (Mapa de Calor):", anchor=False)
     st.markdown("Examina las relaciones lineales entre tus variables numéricas. Una alta correlación entre inputs o entre outputs puede indicar **multicolinealidad**, un reto potencial en DEA.")
     
-    corr_matrix = df[numerical_cols].corr()
-    fig_corr = px.imshow(corr_matrix, 
-                         text_auto=True, 
-                         aspect="auto",
-                         color_continuous_scale=px.colors.sequential.RdBu,
-                         range_color=[-1,1],
-                         title="Matriz de Correlación entre Variables Numéricas",
-                         labels=dict(color="Correlación"))
-    st.plotly_chart(fig_corr, use_container_width=True, key=f"corr_heatmap_{st.session_state.active_scenario_id}", help="Mapa de calor de la matriz de correlación. Valores cercanos a 1 o -1 indican fuerte correlación. Valores cercanos a 0 indican poca o ninguna correlación lineal. La alta correlación entre inputs u outputs puede indicar multicolinealidad, lo que puede afectar los pesos de las variables en DEA.")
+    # Recuperar la matriz de correlación del estado si ya existe
+    corr_matrix_dict = active_scenario['data_overview'].get('correlation_matrix', {})
+    if corr_matrix_dict:
+        corr_matrix = pd.DataFrame(corr_matrix_dict) # Reconstruir DataFrame desde el dict guardado
+        fig_corr = px.imshow(corr_matrix, 
+                            text_auto=True, 
+                            aspect="auto",
+                            color_continuous_scale=px.colors.sequential.RdBu,
+                            range_color=[-1,1],
+                            title="Matriz de Correlación entre Variables Numéricas",
+                            labels=dict(color="Correlación"))
+        st.plotly_chart(fig_corr, use_container_width=True, key=f"corr_heatmap_{st.session_state.active_scenario_id}", help="Mapa de calor de la matriz de correlación. Valores cercanos a 1 o -1 indican fuerte correlación. Valores cercanos a 0 indican poca o ninguna correlación lineal. La alta correlación entre inputs u outputs puede indicar multicolinealidad, lo que puede afectar los pesos de las variables en DEA.")
+    else:
+        st.info("No se pudo generar la matriz de correlación. Asegúrate de tener al menos dos columnas numéricas.")
     
     st.markdown("---")
     st.subheader("Conclusiones de la Exploración Preliminar:")
@@ -728,217 +740,6 @@ def render_validation_step(active_scenario):
             st.rerun()
     else:
         st.warning("Por favor, resuelve los problemas de validación formal antes de proceder al análisis. El DEA no funcionará correctamente con datos inválidos.")
-
-
-def render_proposal_step(active_scenario):
-    st.header(f"Paso 2: Elige un Enfoque de Análisis para '{active_scenario['name']}'", divider="blue")
-    st.info("En este paso, seleccionarás o definirás los **inputs** (recursos utilizados) y **outputs** (resultados producidos) que tu modelo DEA analizará. Esta es una decisión crítica que impacta directamente la validez de tus resultados.")
-    st.info("**Reto de Datos: Selección de Insumos (Inputs) y Productos (Outputs).** La elección de las variables en DEA es crucial y puede ser subjetiva. Una selección inadecuada puede sesgar los resultados. Asegúrate de que tus inputs y outputs estén teóricamente justificados y sean relevantes para el proceso de eficiencia que deseas medir. Considera también la **homogeneidad de las DMUs**; solo deben compararse unidades que operen en entornos y con objetivos similares.")
-
-    if not active_scenario.get('proposals_data'):
-        with st.spinner("La IA está analizando tus datos para sugerir enfoques. Esto puede tardar un momento, ¡gracias por tu paciencia!"):
-            active_scenario['proposals_data'] = cached_get_analysis_proposals(active_scenario['df'])
-    
-    proposals_data = active_scenario['proposals_data']
-    proposals = proposals_data.get("proposals", [])
-    
-    if proposals_data.get("error"):
-        st.error(f"Error al generar propuestas de la IA: {proposals_data['error']}. Contenido crudo: {proposals_data.get('raw_content', 'N/A')}")
-        st.warning("No se pudieron generar propuestas automáticas de la IA. Por favor, procede con la configuración manual de inputs y outputs.")
-        selected_option = "Configuración Manual"
-    else:
-        st.info("La IA ha preparado varias propuestas de enfoques de análisis DEA basadas en tus datos. Puedes seleccionar una de ellas o configurar tus propias variables manualmente.")
-        options_list = ["Configuración Manual"] + [prop.get('title', f"Propuesta {i+1}") for i, prop in enumerate(proposals)]
-        selected_option = st.selectbox(
-            "Selecciona una opción:",
-            options=options_list,
-            key=f"proposal_selection_{st.session_state.active_scenario_id}",
-            help="Elige una propuesta de la IA o selecciona 'Configuración Manual' para definir tus propias variables."
-        )
-
-    st.markdown("---")
-
-    col_df_info, col_manual_config = st.columns([1, 2])
-
-    with col_df_info:
-        st.subheader("Datos Cargados:", anchor=False)
-        st.markdown("Aquí puedes ver las primeras filas de tu conjunto de datos, lo que te ayudará a entender la estructura y las columnas disponibles.")
-        st.dataframe(active_scenario['df'].head())
-        st.markdown(f"**Columnas disponibles:** {', '.join(active_scenario['df'].columns.tolist())}")
-        st.markdown(f"**Número de DMUs (Filas):** {len(active_scenario['df'])}")
-
-    with col_manual_config:
-        st.subheader("Detalles de la Propuesta Seleccionada:", anchor=False)
-        selected_inputs = []
-        selected_outputs = []
-        proposal_title = ""
-        proposal_reasoning = ""
-        
-        # Excluir la primera columna (asumida como DMU ID) de las opciones de selección de inputs/outputs
-        all_cols_for_selection = [col for col in active_scenario['df'].columns.tolist() if col != active_scenario['df'].columns[0]]
-
-        if selected_option == "Configuración Manual":
-            proposal_title = "Configuración Manual del Modelo"
-            proposal_reasoning = "El usuario ha definido las variables de forma personalizada."
-            st.markdown("Define tus propios inputs y outputs para el análisis DEA. Recuerda que deben ser variables numéricas y positivas.")
-            
-            selected_inputs = st.multiselect(
-                "Selecciona las columnas de **Inputs** (Insumos/Recursos):",
-                options=all_cols_for_selection,
-                default=[],
-                key=f"manual_inputs_initial_{st.session_state.active_scenario_id}",
-                help="Elige una o más columnas que representen los recursos que tus DMUs consumen."
-            )
-            selected_outputs = st.multiselect(
-                "Selecciona las columnas de **Outputs** (Productos/Resultados):",
-                options=all_cols_for_selection,
-                default=[],
-                key=f"manual_outputs_initial_{st.session_state.active_scenario_id}",
-                help="Elige una o más columnas que representen los resultados que tus DMUs producen."
-            )
-
-        else:
-            selected_ai_proposal = next((p for p in proposals if p.get('title') == selected_option), None)
-            if selected_ai_proposal:
-                proposal_title = selected_ai_proposal.get('title', '')
-                proposal_reasoning = selected_ai_proposal.get('reasoning', '')
-                selected_inputs = selected_ai_proposal.get('inputs', [])
-                selected_outputs = selected_ai_proposal.get('outputs', [])
-
-                st.markdown(f"**Título de la Propuesta:** {proposal_title}")
-                st.markdown(f"**Razonamiento de la IA:** _{proposal_reasoning}_")
-                st.markdown("La IA ha sugerido estas variables. Puedes ajustarlas si lo consideras necesario para refinar tu modelo.")
-                
-                selected_inputs = st.multiselect(
-                    "Inputs sugeridos (puedes ajustar):",
-                    options=all_cols_for_selection,
-                    default=selected_inputs,
-                    key=f"ai_inputs_adjustable_{st.session_state.active_scenario_id}",
-                    help="Lista de inputs sugeridos por la IA. Puedes añadir o quitar variables."
-                )
-                selected_outputs = st.multiselect(
-                    "Outputs sugeridos (puedes ajustar):",
-                    options=all_cols_for_selection,
-                    default=selected_outputs,
-                    key=f"ai_outputs_adjustable_{st.session_state.active_scenario_id}",
-                    help="Lista de outputs sugeridos por la IA. Puedes añadir o quitar variables."
-                )
-            else:
-                st.warning("Propuesta no encontrada. Por favor, selecciona otra opción o ve a 'Configuración Manual'.")
-
-        st.markdown("---")
-        if st.button("Confirmar y Validar Configuración", type="primary", use_container_width=True, help="Guarda tu selección de inputs y outputs y pasa al paso de validación para asegurar que los datos cumplen los requisitos del DEA."):
-            if not selected_inputs or not selected_outputs:
-                st.error("Debes seleccionar al menos un input y un output para poder continuar.")
-            else:
-                active_scenario['selected_proposal'] = {
-                    "title": proposal_title,
-                    "reasoning": proposal_reasoning,
-                    "inputs": selected_inputs,
-                    "outputs": selected_outputs
-                }
-                active_scenario['app_status'] = "proposal_selected"
-                st.rerun()
-
-def render_upload_step():
-    st.header("Paso 1: Carga tus Datos para Iniciar la Sesión", divider="blue")
-    st.info("Para comenzar, sube tu conjunto de datos en formato CSV. Este fichero será la base para todos tus análisis DEA en esta sesión. Asegúrate de que la primera columna contenga los identificadores únicos de tus Unidades de Toma de Decisiones (DMUs).")
-    uploaded_file = st.file_uploader("Sube un fichero CSV", type=["csv"], label_visibility="collapsed", help="Selecciona un archivo CSV desde tu ordenador. Un buen archivo CSV para DEA debe tener la primera columna como identificadores de DMU y las demás columnas como valores numéricos de inputs y outputs.")
-    
-    if uploaded_file:
-        try:
-            df = pd.read_csv(io.StringIO(uploaded_file.getvalue().decode('utf-8')))
-        except Exception:
-            df = pd.read_csv(io.StringIO(uploaded_file.getvalue().decode('latin-1')), sep=';')
-        
-        st.session_state.global_df = df
-        
-        create_new_scenario(name="Modelo Base") 
-        
-        active_scenario = get_active_scenario() 
-
-        data_overview = {
-            "shape": df.shape,
-            "column_types": df.dtypes.astype(str).to_dict(),
-            "numerical_summary": df.describe(include='number').to_dict(),
-            "null_counts": df.isnull().sum().to_dict(),
-            "non_numeric_issues": {}
-        }
-        
-        zero_neg_issues = {}
-        for col in df.select_dtypes(include='number').columns:
-            if (df[col] <= 0).any():
-                zero_neg_issues[col] = (df[col] <= 0).sum()
-        data_overview["zero_negative_counts"] = zero_neg_issues
-
-        for col in df.columns:
-            if not pd.api.types.is_numeric_dtype(df[col]) and not df[col].isnull().all():
-                if pd.to_numeric(df[col], errors='coerce').isnull().any() and df[col].notnull().any():
-                    data_overview["non_numeric_issues"][col] = True
-
-        active_scenario['data_overview'] = data_overview 
-        active_scenario['app_status'] = "data_loaded" # Transición al nuevo paso de exploración
-        
-        st.rerun() 
-    
-    if st.session_state.get('global_df') is not None:
-        active_scenario = get_active_scenario() 
-        if active_scenario and active_scenario.get('data_overview'):
-            data_overview = active_scenario['data_overview']
-            
-            with st.expander("📊 Informe Rápido de los Datos Cargados", expanded=True):
-                st.subheader("Dimensiones del DataFrame:", anchor=False)
-                st.write(f"Filas: {data_overview['shape'][0]}, Columnas: {data_overview['shape'][1]}")
-
-                st.subheader("Tipos de Datos por Columna:", anchor=False)
-                df_types = pd.DataFrame(data_overview['column_types'].items(), columns=['Columna', 'Tipo de Dato'])
-                st.dataframe(df_types, hide_index=True, help="Muestra el tipo de dato inferido por Streamlit para cada columna. Asegúrate de que tus variables de interés sean numéricas.")
-
-                st.subheader("Resumen Estadístico (Columnas Numéricas):", anchor=False)
-                df_numerical_summary = pd.DataFrame(data_overview['numerical_summary'])
-                st.dataframe(df_numerical_summary, help="Estadísticas descriptivas básicas para las columnas numéricas. Revisa los valores mínimos y máximos.")
-
-                st.subheader("Problemas Potenciales de Datos Detectados:", anchor=False)
-                issues_found = False
-
-                if any(data_overview['null_counts'].values()):
-                    st.warning("⛔ Valores Nulos Detectados:")
-                    df_nulls = pd.Series(data_overview['null_counts'])[pd.Series(data_overview['null_counts']) > 0].rename("Cantidad de Nulos")
-                    st.dataframe(df_nulls.reset_index().rename(columns={'index': 'Columna'}), hide_index=True, help="Columnas que contienen valores nulos (vacíos). El DEA no puede procesar nulos.")
-                    issues_found = True
-
-                if data_overview['non_numeric_issues']:
-                    st.error("❌ Columnas con Valores No Numéricos (Potenciales Errores):")
-                    for col in data_overview['non_numeric_issues']:
-                        st.write(f"- La columna '{col}' parece contener valores que no son números. Esto impedirá el análisis DEA.")
-                    issues_found = True
-                
-                if data_overview['zero_negative_counts']:
-                    st.warning("⚠️ Columnas Numéricas con Ceros o Valores Negativos:")
-                    df_zero_neg = pd.Series(data_overview['zero_negative_counts'])[pd.Series(data_overview['zero_negative_counts']) > 0].rename("Cantidad (Cero/Negativo)")
-                    st.dataframe(df_zero_neg.reset_index().rename(columns={'index': 'Columna'}), hide_index=True, help="El DEA tradicionalmente requiere valores positivos para los inputs y outputs. La presencia de ceros o negativos puede requerir transformaciones o el uso de modelos específicos.")
-                    st.info("El DEA tradicionalmente requiere valores positivos para los inputs y outputs. Estos datos necesitarán atención en los pasos de validación y modelo.")
-                    issues_found = True
-                
-                if not issues_found:
-                    st.success("✅ No se detectaron problemas obvios (nulos, no numéricos, ceros/negativos) en este informe rápido.")
-                else:
-                    st.markdown("---")
-                    st.warning("Se han detectado problemas potenciales en tus datos. Es **altamente recomendable** que realices una limpieza y preparación de tus datos antes de continuar para asegurar la validez de tu análisis DEA.")
-
-
-            st.markdown("---")
-            st.subheader("Guía para la Limpieza y Preparación de Datos")
-            st.info("""
-            Los **Retos de Datos** son uno de los principales desafíos en DEA. Para asegurar la validez de tu análisis, considera los siguientes puntos:
-            * **Manejo de Nulos:** **Elimina** las filas con valores nulos o **rellénalos** con métodos apropiados (ej. media, mediana) *antes* de subir tu CSV.
-            * **Valores Positivos:** Asegúrate de que todos los inputs y outputs sean estrictamente positivos ($>0$). Si tienes ceros o valores negativos, considera transformaciones (ej. añadir una constante muy pequeña) o el uso de modelos DEA que soporten estos valores.
-            * **Outliers:** El DEA es sensible a los valores atípicos. **Investiga** si son errores de medición o valores reales, y decide si deben ser eliminados o ajustados.
-            * **Homogeneidad:** Asegúrate de que las DMUs que comparas son realmente comparables. Factores contextuales o de tamaño pueden requerir **segmentación** de la muestra o el uso de variables contextuales.
-            * **Tipo de Dato:** Confirma que todas las columnas que usarás como inputs/outputs sean **numéricas**.
-
-            **Importante:** Esta aplicación no realiza la limpieza de datos por ti. Te recomendamos encarecidamente preparar y limpiar tus datos en una herramienta externa (ej. Excel, Python con Pandas) antes de subirlos para un análisis DEA óptimo.
-            """)
 
 
 def render_dea_challenges_tab():
@@ -1001,23 +802,24 @@ def main():
     if not active_scenario:
         render_upload_step()
     else:
-        # Añadir el nuevo tab para la exploración preliminar de datos
-        analysis_tab, comparison_tab, challenges_tab, preliminary_data_tab = st.tabs([
+        # Los tabs ahora incluyen el nuevo paso 1b
+        analysis_tab, comparison_tab, challenges_tab = st.tabs([
             "Análisis del Escenario Activo", 
             "Comparar Escenarios", 
-            "Retos del DEA",
-            "Exploración Preliminar de Datos" # Nuevo tab
+            "Retos del DEA"
         ])
 
         with analysis_tab:
             app_status = active_scenario.get('app_status', 'initial')
-            if app_status == "file_loaded": # Después de carga de archivo, pero antes de exploración
-                render_proposal_step(active_scenario)
-            elif app_status == "data_loaded": # Nuevo estado para la exploración preliminar
+            if app_status == "initial": # Archivo no cargado aún
+                render_upload_step()
+            elif app_status == "data_loaded": # Archivo cargado, mostrar exploración preliminar
                 render_preliminary_analysis_step(active_scenario)
-            elif app_status == "proposal_selected":
+            elif app_status == "file_loaded": # Después de exploración, para elegir enfoque
+                render_proposal_step(active_scenario)
+            elif app_status == "proposal_selected": # Propuesta elegida, ir a validación
                 render_validation_step(active_scenario)
-            elif app_status in ["validated", "results_ready"]:
+            elif app_status in ["validated", "results_ready"]: # Validado, ir al dashboard principal
                 render_main_dashboard(active_scenario)
         
         with comparison_tab:
@@ -1026,12 +828,6 @@ def main():
         with challenges_tab:
             render_dea_challenges_tab()
 
-        with preliminary_data_tab: # Contenido del nuevo tab
-            # Asegurarse de que el df exista antes de intentar renderizar
-            if active_scenario and active_scenario.get('df') is not None:
-                render_preliminary_analysis_step(active_scenario)
-            else:
-                st.info("Por favor, carga un archivo CSV en el 'Paso 1: Carga tus Datos' para ver la exploración preliminar.")
 
 if __name__ == "__main__":
     main()
