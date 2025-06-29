@@ -266,7 +266,7 @@ def render_comparison_view():
                         st.markdown(f"**Inputs Seleccionados:** {sc['selected_proposal'].get('inputs')}")
                         st.markdown(f"**Outputs Seleccionados:** {sc['selected_proposal'].get('outputs')}")
                     st.markdown("**Primeras 5 Filas de Resultados:**")
-                    st.dataframe(sc['dea_results']['main_df'].head())
+                    st.dataframe(sc['dea_results']['main_df']) # REMOVED: help argument
                     if sc.get('inquiry_tree'):
                         eee_metrics = compute_eee(sc['inquiry_tree'], depth_limit=3, breadth_limit=5)
                         st.metric("Calidad del Juicio (EEE)", f"{eee_metrics['score']:.2%}", help="El Índice de Equilibrio Erotético (EEE) mide la profundidad, pluralidad y robustez de tu mapa de razonamiento. Una puntuación más alta indica un análisis metodológico más sólido y deliberado.")
@@ -575,7 +575,7 @@ def render_main_dashboard(active_scenario):
         )
         if not period_col: 
             st.warning("El modelo Malmquist requiere una columna de período válida. Por favor, selecciona una columna de tiempo o cambia el tipo de modelo.")
-            st.stop() # Detiene la ejecución si no se selecciona una columna de período
+            st.stop() 
         active_scenario['dea_config']['period_col'] = period_col
     
     if st.button(f"Ejecutar Análisis DEA para '{active_scenario['name']}'", type="primary", use_container_width=True, help="Inicia el cálculo del modelo DEA con la configuración actual. Los resultados y las visualizaciones aparecerán a continuación."):
@@ -605,7 +605,7 @@ def render_main_dashboard(active_scenario):
         results = active_scenario["dea_results"]
         st.header(f"Resultados para: {results['model_name']}", divider="blue")
         st.markdown("Aquí puedes explorar los resultados de eficiencia de tus DMUs y las visualizaciones clave. Estos resultados son la base para tu deliberación metodológica y tu informe final.")
-        st.dataframe(results['main_df'], help="Tabla completa de los resultados de eficiencia para cada DMU.")
+        st.dataframe(results['main_df']) # REMOVED: help argument
         if results.get("charts"):
             st.subheader("Visualizaciones de Resultados")
             st.markdown("Los gráficos te ayudarán a entender la distribución de la eficiencia y otras relaciones importantes en tus datos.")
@@ -784,13 +784,10 @@ def render_upload_step():
         
         st.session_state.global_df = df
         
-        # --- FIX: Crear el escenario ANTES de intentar acceder a active_scenario_id ---
         create_new_scenario(name="Modelo Base") 
         
-        # Obtener el escenario activo, que ahora está garantizado que existe
         active_scenario = get_active_scenario() 
 
-        # Calcular y almacenar el data_overview en el escenario activo
         data_overview = {
             "shape": df.shape,
             "column_types": df.dtypes.astype(str).to_dict(),
@@ -799,21 +796,18 @@ def render_upload_step():
             "non_numeric_issues": {}
         }
         
-        # Check for zeros/negatives in numerical columns
         zero_neg_issues = {}
         for col in df.select_dtypes(include='number').columns:
             if (df[col] <= 0).any():
                 zero_neg_issues[col] = (df[col] <= 0).sum()
         data_overview["zero_negative_counts"] = zero_neg_issues
 
-        # Check for non-numeric values in supposedly numeric columns (after initial load)
         for col in df.columns:
             if not pd.api.types.is_numeric_dtype(df[col]) and not df[col].isnull().all():
-                # Realizar una conversión forzada para identificar no-numéricos que no son nulos
                 if pd.to_numeric(df[col], errors='coerce').isnull().any() and df[col].notnull().any():
                     data_overview["non_numeric_issues"][col] = True
 
-        active_scenario['data_overview'] = data_overview # Store in active scenario
+        active_scenario['data_overview'] = data_overview 
         
         st.rerun() 
     
