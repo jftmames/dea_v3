@@ -2,6 +2,7 @@ import pandas as pd
 import datetime
 from io import BytesIO
 import json
+import plotly.graph_objects as go # Necesario para incrustar figuras de Plotly
 
 def generate_html_report(
     analysis_results: dict,
@@ -59,6 +60,7 @@ def generate_html_report(
         "p {margin-bottom: 1em;}"
         ".section-box {border: 1px solid #e0e0e0; padding: 15px; border-radius: 8px; margin-bottom: 1.5em; background-color: #fcfcfc;}"
         ".note {background-color: #e6f7ff; border-left: 5px solid #2196F3; padding: 10px; margin-bottom: 1em;}"
+        ".plotly-chart { margin-top: 1em; margin-bottom: 1em; border: 1px solid #e0e0e0; border-radius: 8px; padding: 10px; background-color: #ffffff;}"
         "</style>"
         f"<title>Reporte DEA Deliberativo – {fecha}</title></head><body>"
     )
@@ -78,7 +80,7 @@ def generate_html_report(
         html += f"<p><strong>Razonamiento del enfoque:</strong> {proposal.get('reasoning', 'Sin razonamiento provisto.')}</p>"
     html += "</div>"
 
-    # Nueva sección: Estado de los Datos y Validación Inicial
+    # Sección: Estado de los Datos y Validación Inicial (Incluye Preliminar)
     if data_overview_info:
         html += "<h2>2. Estado de los Datos y Validación Inicial</h2>"
         html += "<div class='section-box'>"
@@ -88,14 +90,11 @@ def generate_html_report(
         html += f"<p>Filas: {data_overview_info.get('shape', [0,0])[0]}, Columnas: {data_overview_info.get('shape', [0,0])[1]}</p>"
 
         html += "<h3>2.2. Tipos de Datos por Columna</h3>"
-        html += "<table><tr><th>Columna</th><th>Tipo de Dato</th></tr>"
-        for col, dtype in data_overview_info.get('column_types', {}).items():
-            html += f"<tr><td>{col}</td><td>{dtype}</td></tr>"
-        html += "</table>"
+        df_types = pd.DataFrame(data_overview_info.get('column_types', {}).items(), columns=['Columna', 'Tipo de Dato'])
+        html += df_types.to_html(index=False, border=1, justify="left", na_rep="-")
 
         html += "<h3>2.3. Resumen Estadístico (Columnas Numéricas)</h3>"
-        # Convertir el diccionario de numerical_summary a DataFrame para un mejor HTML
-        numerical_summary_df = pd.DataFrame(data_overview_info.get('numerical_summary', {}))
+        numerical_summary_df = pd.DataFrame(data_overview_info.get('numerical_summary', {})).T
         html += numerical_summary_df.to_html(border=1, justify="left", na_rep="-")
 
         html += "<h3>2.4. Problemas Potenciales de Datos Detectados</h3>"
@@ -126,7 +125,6 @@ def generate_html_report(
             html += "</table>"
             issues_present = True
         
-        # Add LLM validation issues if available
         llm_validation_results = data_overview_info.get('llm_validation_results', {}).get('llm', {})
         if llm_validation_results.get('issues'):
             html += "<p><strong>Sugerencias y Advertencias de la IA (Validación de Idoneidad/Homogeneidad):</strong></p><ul>"
@@ -147,9 +145,44 @@ def generate_html_report(
         html += "<p><strong>Nota sobre la limpieza:</strong> Esta aplicación no realiza la limpieza de datos por ti. Se recomienda encarecidamente preparar y limpiar tus datos en una herramienta externa antes de subirlos para un análisis DEA óptimo. Los problemas aquí indicados (nulos, no numéricos, ceros/negativos) son críticos para la fiabilidad del DEA.</p>"
         html += "</div>"
 
+        # Sección de Análisis Exploratorio de Datos Preliminar
+        html += "<h2>3. Análisis Exploratorio de Datos Preliminar</h2>"
+        html += "<div class='section-box'>"
+        html += "<p>Esta sección presenta visualizaciones clave para entender la distribución de las variables y las relaciones entre ellas antes de la modelización DEA.</p>"
+
+        # Histogramas
+        if 'preliminary_analysis_charts' in data_overview_info and 'histograms' in data_overview_info['preliminary_analysis_charts']:
+            html += "<h3>3.1. Distribución de Variables (Histogramas)</h3>"
+            html += "<p>Los histogramas muestran la distribución de cada columna numérica, ayudando a identificar asimetrías y posibles valores atípicos (outliers).</p>"
+            for col_name, chart_json in data_overview_info['preliminary_analysis_charts']['histograms'].items():
+                # Reconstruir figura de Plotly desde JSON y exportar a HTML
+                fig = go.Figure(json.loads(chart_json))
+                html += f"<div class='plotly-chart'>{fig.to_html(full_html=False, include_plotlyjs='cdn')}</div>"
+
+        # Matriz de Correlación
+        if 'correlation_matrix' in data_overview_info and data_overview_info['correlation_matrix']:
+            html += "<h3>3.2. Matriz de Correlación (Mapa de Calor)</h3>"
+            html += "<p>Este mapa de calor visualiza las relaciones lineales entre todas las variables numéricas. Valores cercanos a 1 o -1 indican fuerte correlación, lo que podría sugerir multicolinealidad entre inputs u outputs, un reto potencial en DEA.</p>"
+            # Convertir el diccionario de la matriz de correlación a DataFrame para Plotly
+            corr_matrix_dict = data_overview_info['correlation_matrix']
+            # Plotly expects a square matrix. Need to ensure column order if recreating from dict
+            keys = list(corr_matrix_dict.keys())
+            corr_df = pd.DataFrame(corr_matrix_dict).T
+            
+            fig_corr = go.Figure(data=go.Heatmap(
+                    z=corr_df.values,
+                    x=corr_df.columns.tolist(),
+                    y=corr_df.index.tolist(),
+                    colorscale='RdBu', # Corresponde a RdBu de px.colors.sequential
+                    zmin=-1, zmax=1,
+                    colorbar=dict(title="Correlación")
+                ))
+            fig_corr.update_layout(title="Matriz de Correlación entre Variables Numéricas")
+            html += f"<div class='plotly-chart'>{fig_corr.to_html(full_html=False, include_plotlyjs='cdn')}</div>"
+        html += "</div>" # Cierra section-box para preliminar
 
     # Sección de Resultados DEA (dinámica)
-    html += f"<h2>3. Resultados Numéricos del Modelo: {model_name}</h2>"
+    html += f"<h2>4. Resultados Numéricos del Modelo: {model_name}</h2>"
     if not df_results.empty:
         html += df_results.to_html(index=False, border=1, justify="left", na_rep="-")
     else:
@@ -157,17 +190,17 @@ def generate_html_report(
 
     # Sección Árbol de Indagación y Justificaciones
     if not df_tree_data.empty:
-        html += "<h2>4. Taller de Auditoría Metodológica</h2>"
+        html += "<h2>5. Taller de Auditoría Metodológica</h2>"
         html += "<div class='section-box'>"
         html += "<p>Esta sección resume el mapa de razonamiento generado por la IA para auditar la robustez metodológica del análisis DEA, junto con las justificaciones aportadas por el investigador.</p>"
         
-        html += "<h3>4.1. Estructura del Mapa de Razonamiento y Justificaciones</h3>"
+        html += "<h3>5.1. Estructura del Mapa de Razonamiento y Justificaciones</h3>"
         html += df_tree_data.to_html(index=False, border=1, justify="left")
         html += "</div>"
         
         if analysis_results.get('tree_explanation'):
             html += "<div class='section-box'>"
-            html += "<h3>4.2. Explicación del Mapa (Generada por IA)</h3>"
+            html += "<h3>5.2. Explicación del Mapa (Generada por IA)</h3>"
             html += f"<p>{analysis_results['tree_explanation']}</p>"
             html += "</div>"
 
@@ -247,38 +280,31 @@ def generate_excel_report(
         
         # 3) Nueva Hoja de Resumen de Datos
         if data_overview_info:
-            summary_data = {
-                "Metrica": [],
-                "Valor": []
-            }
-            summary_data["Metrica"].append("Filas")
-            summary_data["Valor"].append(data_overview_info.get('shape', [0,0])[0])
-            summary_data["Metrica"].append("Columnas")
-            summary_data["Valor"].append(data_overview_info.get('shape', [0,0])[1])
-
+            
             # Tipos de datos
-            df_types = pd.DataFrame(list(data_overview_info.get('column_types', {}).items()), columns=['Columna', 'Tipo de Dato'])
+            df_types = pd.DataFrame(data_overview_info.get('column_types', {}).items(), columns=['Columna', 'Tipo de Dato'])
             if not df_types.empty:
-                df_types.to_excel(writer, sheet_name="Resumen_Datos", startrow=0, startcol=3, index=False)
+                df_types.to_excel(writer, sheet_name="Resumen_Datos", startrow=0, startcol=0, index=False)
                 worksheet_data = writer.sheets["Resumen_Datos"]
                 for idx, col in enumerate(df_types.columns):
                     max_len = max(
                         df_types[col].astype(str).map(len).max() if not df_types.empty else 0,
                         len(str(col))
                     ) + 2
-                    worksheet_data.set_column(idx + 3, idx + 3, max_len)
+                    worksheet_data.set_column(idx, idx, max_len)
             
-            # Resumen Numérico
+            # Resumen Numérico (Transpuesto para mejor lectura en Excel)
             numerical_summary_df_excel = pd.DataFrame(data_overview_info.get('numerical_summary', {})).T
             if not numerical_summary_df_excel.empty:
-                numerical_summary_df_excel.to_excel(writer, sheet_name="Resumen_Datos", startrow=len(df_types)+2, startcol=3)
+                numerical_summary_df_excel.to_excel(writer, sheet_name="Resumen_Datos", startrow=len(df_types)+2, startcol=0)
                 worksheet_data = writer.sheets["Resumen_Datos"]
+                # Ajustar el ancho de las columnas para el resumen numérico
                 for idx, col in enumerate(numerical_summary_df_excel.columns):
                     max_len = max(
                         numerical_summary_df_excel[col].astype(str).map(len).max() if not numerical_summary_df_excel.empty else 0,
                         len(str(col))
                     ) + 2
-                    worksheet_data.set_column(idx + 3 + len(df_types.columns), idx + 3 + len(df_types.columns), max_len) # Adjust start column
+                    worksheet_data.set_column(idx, idx, max_len)
 
 
             # Problemas Potenciales
@@ -306,14 +332,41 @@ def generate_excel_report(
 
             df_issues = pd.DataFrame(issues_rows)
             if not df_issues.empty:
-                df_issues.to_excel(writer, sheet_name="Resumen_Datos", startrow=0, startcol=0, index=False)
+                # Escribir debajo de las tablas anteriores o en una nueva columna
+                start_row_issues = 0
+                start_col_issues = 0 # Asumimos que no hay solapamiento con las tablas principales que van en (0,0)
+                if not df_types.empty:
+                    start_col_issues = df_types.shape[1] + 2 # Colocar después de la tabla de tipos
+                
+                df_issues.to_excel(writer, sheet_name="Resumen_Datos", startrow=start_row_issues, startcol=start_col_issues, index=False)
                 worksheet_data = writer.sheets["Resumen_Datos"]
                 for idx, col in enumerate(df_issues.columns):
                     max_len = max(
                         df_issues[col].astype(str).map(len).max() if not df_issues.empty else 0,
                         len(str(col))
                     ) + 2
-                    worksheet_data.set_column(idx, idx, max_len)
+                    worksheet_data.set_column(idx + start_col_issues, idx + start_col_issues, max_len)
+
+            # Matriz de Correlación
+            if 'correlation_matrix' in data_overview_info and data_overview_info['correlation_matrix']:
+                corr_matrix_dict = data_overview_info['correlation_matrix']
+                corr_df = pd.DataFrame(corr_matrix_dict).T # Reconstruir DataFrame de correlación
+                
+                if not corr_df.empty:
+                    # Escribir en una nueva hoja para la matriz de correlación
+                    corr_df.to_excel(writer, sheet_name="Matriz_Correlacion", index=True)
+                    worksheet_corr = writer.sheets["Matriz_Correlacion"]
+                    for idx, col in enumerate(corr_df.columns):
+                        max_len = max(
+                            corr_df[col].astype(str).map(len).max() if not corr_df.empty else 0,
+                            len(str(col))
+                        ) + 2
+                        worksheet_corr.set_column(idx + 1, idx + 1, max_len) # +1 para la columna de índice
+                    
+                    # Ajustar ancho de la primera columna (índice)
+                    max_idx_len = max(len(str(s)) for s in corr_df.index) + 2
+                    worksheet_corr.set_column(0, 0, max_idx_len)
+
 
     output.seek(0)
     return output
