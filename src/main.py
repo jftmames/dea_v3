@@ -265,14 +265,19 @@ def render_interactive_inquiry_tree(active_scenario):
         st.warning("Aún no se ha generado un mapa metodológico. Haz clic en el botón de arriba para crearlo.")
         return
 
-    def render_node_with_justification(node_dict, level=0):
-        """Función recursiva para renderizar cada nodo del árbol con su campo de texto."""
+    # Helper function to recursively render nodes
+    def _render_node_recursively(node_dict, level=0, path_prefix=""):
         for question, children in node_dict.items():
+            # Create a unique path for the current question
+            # This path ensures the Streamlit key is unique across all text_areas
+            current_path = f"{path_prefix}__{question}" if path_prefix else question
+            
             st.markdown(f"<div style='margin-left: {level*20}px; border-left: 2px solid #ccc; padding-left: 10px; margin-top: 10px;'>"
                         f"<b>Pregunta de Auditoría:</b> {question}"
                         f"</div>", unsafe_allow_html=True)
             
-            justification_key = f"just_{st.session_state.active_scenario_id}_{question}"
+            justification_key = f"just_{st.session_state.active_scenario_id}_{current_path}"
+            # Use the original question text for dictionary lookup, not the full path
             current_justification = active_scenario['user_justifications'].get(question, "")
             
             user_input = st.text_area(
@@ -283,12 +288,14 @@ def render_interactive_inquiry_tree(active_scenario):
                 placeholder="Escribe aquí tu razonamiento, citando literatura si es necesario..."
             )
             
+            # Store justification using the original question as key
             active_scenario['user_justifications'][question] = user_input
             
             if isinstance(children, dict) and children:
-                render_node_with_justification(children, level + 1)
+                _render_node_recursively(children, level + 1, current_path)
 
-    render_node_with_justification(tree)
+    # Initial call to start the recursive rendering
+    _render_node_recursively(tree)
 
 def render_deliberation_workshop(active_scenario):
     if not active_scenario.get('dea_results'): return
@@ -743,4 +750,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
