@@ -1662,7 +1662,7 @@ class AppRenderer:
 
                     st.subheader("Resumen Estadístico (Columnas Numéricas):", anchor=False)
                     df_numerical_summary = pd.DataFrame(data_overview['numerical_summary'])
-                    st.dataframe(df_numerical_summary, help="Estadísticas descriptivas básicas para las columnas numéricas. Revisa los valores mínimos y máximos.")
+                    st.dataframe(df[numerical_cols].describe().T)
 
                     st.subheader("Problemas Potenciales de Datos Detectados:", anchor=False)
                     issues_found = False
