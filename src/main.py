@@ -78,7 +78,6 @@ def get_active_scenario():
 
 def initialize_global_state():
     """Inicializa el estado global de la app."""
-    # Solo inicializa si 'scenarios' no existe, lo que permite a reset_all() borrarlo primero.
     if 'scenarios' not in st.session_state:
         st.session_state.scenarios = {}
         st.session_state.active_scenario_id = None
@@ -86,7 +85,6 @@ def initialize_global_state():
 
 def reset_all():
     """Reinicia la aplicación a su estado inicial, eliminando todos los datos y escenarios."""
-    # Limpiar todas las cachés de funciones para asegurar un estado limpio
     cached_get_analysis_proposals.clear()
     cached_run_dea_analysis.clear()
     cached_run_inquiry_engine.clear()
@@ -94,14 +92,9 @@ def reset_all():
     cached_generate_candidates.clear()
     cached_evaluate_candidates.clear()
 
-    # Borrar TODAS las claves del session_state para un reseteo completo
-    # Esto es crucial para asegurar que no queden remanentes de sesiones anteriores.
     st.session_state.clear() 
 
-    # Re-inicializar el estado global básico para que la app pueda arrancar limpia.
-    # initialize_global_state() se llamará en la siguiente ejecución del script
-    # y creará las estructuras iniciales de nuevo.
-    pass # No se necesita llamar initialize_global_state() aquí, se ejecutará en la siguiente pasada.
+    pass 
 
 
 # --- 3) FUNCIONES DE CACHÉ Y LÓGICA DE IA ---
@@ -247,7 +240,8 @@ def render_comparison_view():
             help="Selecciona el primer escenario para la comparación."
         )
     with col2:
-        options_b = [sid for sid sid in st.session_state.scenarios.keys() if sid != id_a] or [id_a] # Ensure at least one option
+        # CORRECCIÓN: sid in st.session_state.scenarios.keys()
+        options_b = [sid for sid in st.session_state.scenarios.keys() if sid != id_a] or [id_a] 
         id_b = st.selectbox(
             "Con Escenario B:", 
             options_b, 
@@ -271,7 +265,7 @@ def render_comparison_view():
             with st.container(border=True):
                 if sc.get('dea_results'):
                     st.markdown("**Configuración del Modelo:**")
-                    st.json(sc.get('dea_config', {}), expanded=False) # Collapsed for brevity
+                    st.json(sc.get('dea_config', {}), expanded=False) 
                     if sc.get('selected_proposal'):
                         st.markdown(f"**Inputs Seleccionados:** {sc['selected_proposal'].get('inputs')}")
                         st.markdown(f"**Outputs Seleccionados:** {sc['selected_proposal'].get('outputs')}")
@@ -894,7 +888,8 @@ def render_dea_challenges_tab():
     * **Disponibilidad y Calidad de Datos:** Datos incompletos o erróneos pueden invalidar el análisis.
     * **Número de Variables vs. DMUs:** Demasiadas variables para pocas DMUs pueden inflar artificialmente la eficiencia.
     * **Valores Nulos, Negativos y Cero:** Los modelos DEA clásicos requieren datos positivos. Estos valores deben tratarse adecuadamente.
-        * **La aplicación ayuda:** En el **Paso 1**, se ofrece un informe rápido de los datos cargados y una guía de preparación. En el **Paso 2b**, se realizan validaciones formales para detectar y advertir sobre estos problemas antes del análisis.
+        * **La aplicación ayuda:** En el **Paso 1**, se ofrece un informe rápido de los datos cargados y una guía de preparación. En el **Paso 2b**, se realizan validaciones formal
+    s para detectar y advertir sobre estos problemas antes del análisis.
     * **Outliers (Valores Atípicos):** El DEA es sensible a los outliers, que pueden distorsionar la frontera de eficiencia.
     * **Homogeneidad de las DMUs:** Las unidades analizadas deben ser comparables entre sí. Comparar entidades muy dispares lleva a conclusiones erróneas.
         * **La aplicación ayuda:** En el **Paso 2**, se enfatiza la importancia de la homogeneidad, y la IA puede ofrecer sugerencias al respecto.
@@ -929,7 +924,7 @@ def main():
     st.sidebar.markdown("Una herramienta para el análisis de eficiencia y la deliberación metodológica asistida por IA. Sigue los pasos para un estudio DEA robusto.")
     if st.sidebar.button("🔴 Empezar Nueva Sesión", help="Borra todos los datos y escenarios actuales para empezar un análisis desde cero. ¡Cuidado, esta acción no se puede deshacer!"):
         reset_all()
-        st.rerun() # Esto recarga la página completamente después del reseteo
+        st.rerun() 
     st.sidebar.divider()
     
     render_scenario_navigator()
