@@ -9,15 +9,16 @@ import openai
 import plotly.express as px 
 
 # --- 0) AJUSTE DEL PYTHONPATH Y CONFIGURACIÓN INICIAL ---
-# Asegura que los módulos locales se puedan importar correctamente.
+# Ensures that local modules can be imported correctly.
 script_dir = os.path.dirname(__file__)
 if script_dir not in sys.path:
     sys.path.insert(0, script_dir)
 
-# Configuración de la página de Streamlit. "wide" aprovecha mejor el espacio.
+# Streamlit page configuration. "wide" layout uses more screen space.
 st.set_page_config(layout="wide", page_title="DEA Deliberative Modeler")
 
-# --- 1) IMPORTACIONES DE MÓDULOS DEL PROYECTO ---
+# --- 1) PROJECT MODULE IMPORTS ---
+# Import all necessary functions from other project files.
 from analysis_dispatcher import execute_analysis
 from inquiry_engine import generate_inquiry, to_plotly_tree
 from epistemic_metrics import compute_eee
@@ -27,10 +28,10 @@ from dea_models.visualizations import plot_hypothesis_distribution, plot_correla
 from dea_models.auto_tuner import generate_candidates, evaluate_candidates 
 from openai_helpers import explain_inquiry_tree
 
-# --- 2) GESTIÓN DE ESTADO MULTI-ESCENARIO (Funciones Auxiliares de Lógica de Negocio/Estado) ---
+# --- 2) MULTI-SCENARIO STATE MANAGEMENT (Auxiliary Logic Functions) ---
 
 def create_new_scenario(name: str = "Modelo Base", source_scenario_id: str = None):
-    """Crea un nuevo escenario, ya sea en blanco o clonando uno existente."""
+    """Creates a new scenario, either blank or by cloning an existing one."""
     new_id = str(uuid.uuid4()) 
     
     if source_scenario_id and source_scenario_id in st.session_state.scenarios:
@@ -62,34 +63,33 @@ def create_new_scenario(name: str = "Modelo Base", source_scenario_id: str = Non
     st.session_state.active_scenario_id = new_id
 
 def get_active_scenario():
-    """Devuelve el diccionario del escenario actualmente activo."""
+    """Returns the dictionary of the currently active scenario."""
     active_id = st.session_state.get('active_scenario_id')
     if active_id and active_id in st.session_state.scenarios:
         return st.session_state.scenarios[active_id]
     return None
 
 def initialize_global_state():
-    """Inicializa el estado global de la app."""
+    """Initializes the global state of the app."""
     if 'scenarios' not in st.session_state:
         st.session_state.scenarios = {}
         st.session_state.active_scenario_id = None
         st.session_state.global_df = None
 
 def reset_all():
-    """Reinicia la aplicación a su estado inicial, eliminando todos los datos y escenarios."""
-    cached_get_analysis_proposals.clear()
-    cached_run_dea_analysis.clear()
-    cached_run_inquiry_engine.clear()
-    cached_explain_tree.clear()
-    cached_generate_candidates.clear()
-    cached_evaluate_candidates.clear()
+    """Resets the application to its initial state, deleting all data and scenarios."""
+    st.cache_data.clear() # Clear all st.cache_data functions
+    st.cache_resource.clear() # Clear all st.cache_resource functions if any
 
-    st.session_state.clear() 
+    # Explicitly clear all session state variables
+    for key in list(st.session_state.keys()):
+        del st.session_state[key]
+    
+    # Reinitialize minimal global state needed for immediate restart
+    initialize_global_state()
 
-    pass 
 
-
-# --- 3) FUNCIONES DE CACHÉ Y LÓGICA DE IA (Auxiliares) ---
+# --- 3) CACHED AND AI LOGIC FUNCTIONS (Auxiliary) ---
 
 @st.cache_data
 def cached_get_analysis_proposals(_df):
@@ -163,9 +163,9 @@ def generate_analysis_proposals(df_columns: list[str], df_head: pd.DataFrame):
         return {"error": f"Error al procesar la respuesta de la IA: {str(e)}", "raw_content": content}
 
 
-# --- FUNCIONES DE RENDERIZADO DE LA UI ---
-# TODAS las funciones de renderizado se definen AQUÍ.
-# Este es el orden CRÍTICO para evitar NameError en Streamlit.
+# --- UI RENDERING FUNCTIONS ---
+# ALL UI rendering functions are defined here, BEFORE the main() function.
+# This is CRITICAL to resolve NameErrors in Streamlit.
 
 def render_scenario_navigator():
     st.sidebar.title("Navegador de Escenarios")
@@ -180,7 +180,7 @@ def render_scenario_navigator():
     active_id = st.session_state.get('active_scenario_id')
     
     if active_id not in scenario_names:
-        active_id = next(iter(scenario_names)) if scenario_names else None
+        active_id = next(iter(scenario_names)) if scenario_names else None 
     
     st.session_state.active_scenario_id = st.sidebar.selectbox(
         "Escenario Activo",
@@ -194,25 +194,32 @@ def render_scenario_navigator():
     st.sidebar.subheader("Acciones de Escenario")
     st.sidebar.markdown("Utiliza estas opciones para organizar y probar diferentes enfoques sin perder tu trabajo.")
     if st.sidebar.button("➕ Nuevo Escenario", help="Crea un nuevo modelo desde cero con los mismos datos cargados. Ideal para empezar un análisis completamente nuevo."):
-        create_new_scenario(name=f"Nuevo Modelo {len(st.session_state.scenarios) + 1}")
+        # Request a new scenario from main, which handles state updates and rerunning
+        st.session_state._new_scenario_requested = True 
         st.rerun()
 
     if st.sidebar.button("📋 Clonar Escenario Actual", help="Crea una copia exacta del escenario actualmente activo. Útil para probar pequeñas variaciones en la configuración o las variables sin afectar el original."):
-        create_new_scenario(source_scenario_id=st.session_state.active_scenario_id)
+        # Request to clone the current scenario from main
+        st.session_state._clone_scenario_requested = st.session_state.active_scenario_id
         st.rerun()
     
-    active_scenario = get_active_scenario()
-    if active_scenario:
-        new_name = st.sidebar.text_input("Renombrar escenario:", value=active_scenario['name'], key=f"rename_{st.session_state.active_scenario_id}")
-        if new_name != active_scenario['name']:
-            active_scenario['name'] = new_name
+    active_scenario_from_state = get_active_scenario() # Get the current active scenario
+    if active_scenario_from_state:
+        new_name = st.sidebar.text_input("Renombrar escenario:", value=active_scenario_from_state['name'], key=f"rename_{st.session_state.active_scenario_id}")
+        if new_name != active_scenario_from_state['name']:
+            active_scenario_from_state['name'] = new_name
             st.rerun()
 
     st.sidebar.divider()
     if len(st.session_state.scenarios) > 1:
         if st.sidebar.button("🗑️ Eliminar Escenario Actual", type="primary", help="Borra el escenario activo de forma permanente. Ten precaución, esta acción no se puede deshacer."):
             del st.session_state.scenarios[st.session_state.active_scenario_id]
-            st.session_state.active_scenario_id = next(iter(st.session_state.scenarios))
+            # After deleting, ensure a valid active_scenario_id is set
+            if st.session_state.scenarios:
+                st.session_state.active_scenario_id = next(iter(st.session_state.scenarios.keys()))
+            else:
+                # If no scenarios left, reset to initial app state
+                reset_all() # Resets all session state, including global_df and scenarios
             st.rerun()
 
 def render_comparison_view():
@@ -266,6 +273,7 @@ def render_comparison_view():
                     st.markdown("**Primeras 5 Filas de Resultados:**")
                     st.dataframe(sc['dea_results']['main_df']) 
                     if sc.get('inquiry_tree'):
+                        # Now compute_eee is globally defined, no need to pass
                         eee_metrics = compute_eee(sc['inquiry_tree'], depth_limit=3, breadth_limit=5)
                         st.metric("Calidad del Juicio (EEE)", f"{eee_metrics['score']:.2%}", help="El Índice de Equilibrio Erotético (EEE) mide la profundidad, pluralidad y robustez de tu mapa de razonamiento. Una puntuación más alta indica un análisis metodológico más sólido y deliberado.")
                 else:
@@ -286,7 +294,7 @@ def render_eee_explanation(eee_metrics: dict):
         """)
 
 def render_interactive_inquiry_tree(active_scenario):
-    """Muestra el árbol de preguntas y captura las justificaciones del usuario."""
+    """Shows the inquiry tree and captures user justifications."""
     st.subheader("Taller de Auditoría Metodológica", anchor=False)
     st.info("Este es el corazón de tu informe deliberativo. Responde a cada pregunta de auditoría generada por la IA, documentando tu razonamiento, citando literatura o explicando las decisiones clave que tomaste. Tu objetivo es justificar la robustez y validez de tu análisis DEA.")
     
@@ -295,12 +303,8 @@ def render_interactive_inquiry_tree(active_scenario):
         st.warning("Aún no se ha generado un mapa metodológico. Haz clic en el botón 'Generar Mapa Metodológico' en la sección superior para crearlo y empezar a documentar tu análisis.")
         return
 
-    # Helper function to recursively render nodes
     def _render_node_recursively(node_dict, level=0, path_prefix=""):
         for question, children in node_dict.items():
-            # Create a unique path for the current question
-            # This path ensures the Streamlit key is unique across all text_areas
-            # Convert question to a safe string for key
             safe_question = "".join(c for c in question if c.isalnum() or c in [' ', '_', '-']).replace(' ', '_')[:50]
             current_path = f"{path_prefix}__{safe_question}_{level}" if path_prefix else f"{safe_question}_{level}"
             
@@ -309,7 +313,6 @@ def render_interactive_inquiry_tree(active_scenario):
                         f"</div>", unsafe_allow_html=True)
             
             justification_key = f"just_{st.session_state.active_scenario_id}_{current_path}"
-            # Use the original question text for dictionary lookup, not the full path
             current_justification = active_scenario['user_justifications'].get(question, "")
             
             user_input = st.text_area(
@@ -320,16 +323,14 @@ def render_interactive_inquiry_tree(active_scenario):
                 placeholder="Escribe aquí tu razonamiento, citando literatura, explicando decisiones o refutando la pregunta de la IA. ¡Sé lo más detallado posible!"
             )
             
-            # Store justification using the original question as key
             active_scenario['user_justifications'][question] = user_input
             
             if isinstance(children, dict) and children:
                 _render_node_recursively(children, level + 1, current_path)
 
-    # Initial call to start the recursive rendering
     _render_node_recursively(tree)
 
-def render_deliberation_workshop(active_scenario):
+def render_deliberation_workshop(active_scenario): # Removed explicit function passing, as they are now global
     if not active_scenario.get('dea_results'): 
         st.info("Ejecuta un análisis DEA en el Paso 3 para desbloquear el Taller de Deliberación Metodológica.")
         return
@@ -354,18 +355,18 @@ def render_deliberation_workshop(active_scenario):
                     "outputs": active_scenario['selected_proposal']['outputs'],
                     "num_dmus": len(active_scenario['df'])
                 }
-                tree, error = cached_run_inquiry_engine(root_question_methodology, context)
+                tree, error = cached_run_inquiry_engine(root_question_methodology, context) # Call global cached function
                 if error: st.error(f"Error al generar el mapa: {error}")
                 active_scenario['inquiry_tree'] = tree
-                active_scenario['user_justifications'] = {} # Limpia justificaciones al generar nuevo árbol
+                active_scenario['user_justifications'] = {} # Clears justifications when new tree is generated
         
         if active_scenario.get("inquiry_tree"):
             with st.expander("Ver visualización del árbol y explicación de la IA", expanded=False):
                 st.markdown("Explora la estructura jerárquica de las preguntas de auditoría.")
-                st.plotly_chart(to_plotly_tree(active_scenario['inquiry_tree']), use_container_width=True)
+                st.plotly_chart(to_plotly_tree(active_scenario['inquiry_tree']), use_container_width=True) 
                 if st.button("Generar Explicación del Mapa por IA", key=f"explain_tree_{st.session_state.active_scenario_id}", help="Obtén una explicación en lenguaje natural del propósito y la estructura del mapa de auditoría generado."):
                     with st.spinner("La IA está redactando la explicación..."):
-                        explanation_data = cached_explain_tree(active_scenario['inquiry_tree'])
+                        explanation_data = cached_explain_tree(active_scenario['inquiry_tree']) # Call global cached function
                         if explanation_data.get("error"):
                             st.error(f"Error al generar explicación: {explanation_data['error']}")
                         else:
@@ -375,15 +376,14 @@ def render_deliberation_workshop(active_scenario):
                     st.subheader("Explicación del Mapa (Generada por IA)")
                     st.markdown(active_scenario['tree_explanation'])
             
-            eee_metrics = compute_eee(active_scenario['inquiry_tree'], depth_limit=3, breadth_limit=5)
-            render_eee_explanation(eee_metrics)
+            eee_metrics = compute_eee(active_scenario['inquiry_tree'], depth_limit=3, breadth_limit=5) # Call global function
+            render_eee_explanation(eee_metrics) 
 
     st.divider()
     
-    # Nuevo componente interactivo para las justificaciones
     render_interactive_inquiry_tree(active_scenario)
 
-def render_optimization_workshop(active_scenario):
+def render_optimization_workshop(active_scenario): # Removed explicit function passing
     if not active_scenario.get('dea_results'): 
         st.info("Ejecuta un análisis DEA en el Paso 3 para desbloquear el Taller de Optimización Asistida por IA.")
         return
@@ -398,14 +398,14 @@ def render_optimization_workshop(active_scenario):
         
         eee_score = 0.5 
         if active_scenario.get('inquiry_tree'):
-            eee_metrics = compute_eee(active_scenario['inquiry_tree'], depth_limit=3, breadth_limit=5)
+            eee_metrics = compute_eee(active_scenario['inquiry_tree'], depth_limit=3, breadth_limit=5) 
             eee_score = eee_metrics['score']
             
         st.subheader("Generar Candidatos de Configuración")
         st.markdown("Permite que la IA proponga configuraciones alternativas de inputs y outputs. Esto es útil para explorar la robustez de tus resultados ante diferentes especificaciones de modelo.")
         if st.button("Sugerir Configuraciones Alternativas", key=f"gen_candidates_{st.session_state.active_scenario_id}", help="La IA generará un conjunto de combinaciones alternativas de inputs y outputs basadas en el conjunto de datos cargado."):
             with st.spinner("La IA está generando candidatos de configuración..."):
-                candidates = cached_generate_candidates(
+                candidates = cached_generate_candidates( # Call global cached function
                     active_scenario['df'],
                     active_scenario['df'].columns[0],
                     current_inputs,
@@ -421,7 +421,7 @@ def render_optimization_workshop(active_scenario):
             st.markdown("Una vez generados los candidatos, evalúa rápidamente su impacto en la eficiencia promedio y una métrica simulada de calidad de juicio (EEE).")
             if st.button("Evaluar Candidatos Sugeridos", key=f"eval_candidates_{st.session_state.active_scenario_id}", help="Ejecuta un análisis preliminar de eficiencia para cada configuración sugerida por la IA."):
                 with st.spinner("Evaluando candidatos... Esto puede llevar un tiempo para un gran número de candidatos."):
-                    evaluations = cached_evaluate_candidates(
+                    evaluations = cached_evaluate_candidates( # Call global cached function
                         active_scenario['df'],
                         active_scenario['df'].columns[0],
                         active_scenario['optimization_candidates'],
@@ -476,7 +476,7 @@ def render_optimization_workshop(active_scenario):
         st.warning("Necesitas haber ejecutado un análisis DEA base (Paso 3) para usar esta sección de optimización.")
 
 
-def render_download_section(active_scenario):
+def render_download_section(active_scenario): # Removed explicit function passing
     results = active_scenario.get('dea_results')
     if not results: return
 
@@ -484,7 +484,7 @@ def render_download_section(active_scenario):
     st.markdown(f"Descarga los resultados cuantitativos y el informe deliberativo (que incluye tus justificaciones y el mapa de auditoría de la IA) para el escenario **'{active_scenario['name']}'**.")
     col1, col2 = st.columns(2)
     with col1:
-        html_report = generate_html_report(
+        html_report = generate_html_report( # Call global function
             analysis_results=results,
             inquiry_tree=active_scenario.get("inquiry_tree"),
             user_justifications=active_scenario.get("user_justifications", {}),
@@ -492,7 +492,7 @@ def render_download_section(active_scenario):
         )
         st.download_button(label="Descargar Informe en HTML", data=html_report, file_name=f"report_{active_scenario['name'].replace(' ', '_')}.html", mime="text/html", use_container_width=True, help="Descarga un informe HTML completo con los resultados, el mapa de auditoría y tus justificaciones.")
     with col2:
-        excel_report = generate_excel_report(
+        excel_report = generate_excel_report( # Call global function
             analysis_results=results,
             inquiry_tree=active_scenario.get("inquiry_tree"),
             user_justifications=active_scenario.get("user_justifications", {}),
@@ -501,7 +501,7 @@ def render_download_section(active_scenario):
         st.download_button(label="Descargar Informe en Excel", data=excel_report, file_name=f"report_{active_scenario['name'].replace(' ', '_')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True, help="Descarga un archivo Excel con los resultados numéricos del DEA, el resumen de datos y una tabla del mapa de auditoría.")
 
 
-def render_main_dashboard(active_scenario):
+def render_main_dashboard(active_scenario): # Removed explicit function passing
     st.header(f"Paso 3: Configuración y Análisis para '{active_scenario['name']}'", divider="blue")
     st.markdown("En este paso, configurarás y ejecutarás el modelo DEA. Asegúrate de que los inputs y outputs seleccionados sean los correctos y de que la elección del modelo se alinee con los objetivos de tu análisis.")
     
@@ -578,10 +578,8 @@ def render_main_dashboard(active_scenario):
     
     if st.button(f"Ejecutar Análisis DEA para '{active_scenario['name']}'", type="primary", use_container_width=True, help="Inicia el cálculo del modelo DEA con la configuración actual. Los resultados y las visualizaciones aparecerán a continuación."):
         with st.spinner(f"Ejecutando {model_name} para '{active_scenario['name']}'... Esto puede tomar unos segundos o minutos dependiendo del tamaño de tus datos."):
-            df = active_scenario['df']
-            proposal = active_scenario['selected_proposal']
-            
-            validation_results = validate_data(df, proposal.get('inputs', []), proposal.get('outputs', []))
+            # Call global functions
+            validation_results = validate_data(active_scenario['df'], proposal.get('inputs', []), proposal.get('outputs', []))
             active_scenario['data_overview']['llm_validation_results'] = validation_results
             
             if validation_results['formal_issues']:
@@ -591,7 +589,7 @@ def render_main_dashboard(active_scenario):
                 return 
             
             try:
-                results = cached_run_dea_analysis(df, df.columns[0], proposal.get('inputs', [], ), proposal.get('outputs', []), model_key, period_col)
+                results = cached_run_dea_analysis(active_scenario['df'], active_scenario['df'].columns[0], proposal.get('inputs', []), proposal.get('outputs', []), model_key, period_col)
                 active_scenario['dea_results'] = results
                 active_scenario['app_status'] = "results_ready"
             except Exception as e:
@@ -610,7 +608,8 @@ def render_main_dashboard(active_scenario):
             for chart_title, fig in results["charts"].items():
                 st.plotly_chart(fig, use_container_width=True, help=f"Gráfico: {chart_title}")
         
-        render_deliberation_workshop(active_scenario)
+        # Call global functions
+        render_deliberation_workshop(active_scenario) 
         render_optimization_workshop(active_scenario)
         render_download_section(active_scenario)
 
@@ -694,7 +693,8 @@ def render_proposal_step(active_scenario):
 
     if not active_scenario.get('proposals_data'):
         with st.spinner("La IA está analizando tus datos para sugerir enfoques. Esto puede tardar un momento, ¡gracias por tu paciencia!"):
-            active_scenario['proposals_data'] = cached_get_analysis_proposals(active_scenario['df'])
+            # Call global function
+            active_scenario['proposals_data'] = generate_analysis_proposals(active_scenario['df'].columns.tolist(), active_scenario['df'].head())
     
     proposals_data = active_scenario['proposals_data']
     proposals = proposals_data.get("proposals", [])
@@ -813,6 +813,7 @@ def render_validation_step(active_scenario):
     st.markdown(f"**Razonamiento:** {proposal.get('reasoning', 'Configuración definida por el usuario o sugerida por la IA.')}")
 
     with st.spinner("La IA está validando la coherencia de los datos y el modelo... Esto puede tomar unos segundos."):
+        # Call global function
         validation_results = validate_data(active_scenario['df'], proposal['inputs'], proposal['outputs'])
         active_scenario['data_overview']['llm_validation_results'] = validation_results
     
@@ -879,11 +880,11 @@ def render_dea_challenges_tab():
     """)
 
 
-# --- FUNCIÓN PRINCIPAL DE LA APLICACIÓN ---
-# La función main() orquesta el flujo general de la aplicación.
-# Todas las funciones de renderizado deben estar definidas antes de esta.
+# --- MAIN APPLICATION FUNCTION ---
+# The main() function orchestrates the overall flow of the application.
+# All rendering functions must be defined BEFORE this function.
 def main():
-    """Función principal que orquesta la aplicación multi-escenario."""
+    """Main function that orchestrates the multi-scenario application."""
     initialize_global_state() 
 
     st.sidebar.image("https://i.imgur.com/8y0N5c5.png", width=200)
@@ -894,14 +895,14 @@ def main():
         st.rerun() 
     st.sidebar.divider()
     
-    render_scenario_navigator() # Llamada a la función de renderizado de la barra lateral
+    render_scenario_navigator() # Call to sidebar rendering function
 
     st.sidebar.markdown("---")
     st.sidebar.info("Una herramienta para el análisis de eficiencia y la deliberación metodológica asistida por IA.")
 
     active_scenario = get_active_scenario() 
 
-    # Los tabs se definen una sola vez en el ámbito principal.
+    # Tabs are defined once in the main scope.
     analysis_tab, comparison_tab, challenges_tab = st.tabs([
         "Análisis del Escenario Activo", 
         "Comparar Escenarios", 
@@ -909,7 +910,8 @@ def main():
     ])
 
     with analysis_tab:
-        # La lógica de estados determina qué parte del flujo se renderiza en este tab.
+        # Logic of states determines which part of the flow is rendered in this tab.
+        # This explicit check also handles the initial state where no scenario might be active.
         app_status = active_scenario.get('app_status', 'initial') if active_scenario else 'initial'
 
         if app_status == "initial":
