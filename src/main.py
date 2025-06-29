@@ -926,8 +926,7 @@ class AppRenderer:
 
                     st.subheader("Tipos de Datos por Columna:", anchor=False)
                     df_types = pd.DataFrame(data_overview['column_types'].items(), columns=['Columna', 'Tipo de Dato'])
-                    st.dataframe(df_types, hide_index=True, help="Muestra el tipo de dato inferido por Streamlit para cada columna. Asegúrate de que tus variables de interés sean numéricas.")
-
+                    st.dataframe(df_types, hide_index=True)
                     st.subheader("Resumen Estadístico (Columnas Numéricas):", anchor=False)
                     df_numerical_summary = pd.DataFrame(data_overview['numerical_summary'])
                     st.dataframe(df_numerical_summary, help="Estadísticas descriptivas básicas para las columnas numéricas. Revisa los valores mínimos y máximos.")
