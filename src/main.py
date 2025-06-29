@@ -4,8 +4,8 @@ import pandas as pd
 import streamlit as st
 import io
 import json
-import uuid # Asegúrate de que uuid esté importado
-
+import uuid 
+import openai # CAMBIO: Importar el módulo completo
 
 # --- 0) AJUSTE DEL PYTHONPATH Y CONFIGURACIÓN INICIAL ---
 # Asegura que los módulos locales se puedan importar correctamente.
@@ -24,7 +24,7 @@ from epistemic_metrics import compute_eee
 from data_validator import validate as validate_data
 from report_generator import generate_html_report, generate_excel_report
 from dea_models.visualizations import plot_hypothesis_distribution, plot_correlation
-from dea_models.auto_tuner import generate_candidates, evaluate_candidates # Nueva importación
+from dea_models.auto_tuner import generate_candidates, evaluate_candidates 
 from openai_helpers import explain_inquiry_tree
 
 # --- 2) GESTIÓN DE ESTADO MULTI-ESCENARIO ---
@@ -127,12 +127,17 @@ def get_openai_client():
         st.error("La clave de API de OpenAI no ha sido configurada.")
         st.info("Añade tu clave 'OPENAI_API_KEY' en los 'Secrets' de la app y refresca la página.")
         return None # Devuelve None si la API key no está configurada
-    return OpenAI(api_key=api_key)
+    try:
+        # CAMBIO: Usar openai.OpenAI explícitamente
+        return openai.OpenAI(api_key=api_key) 
+    except Exception as e:
+        st.error(f"Error al inicializar el cliente de OpenAI: {e}")
+        return None
 
 def chat_completion(prompt: str, use_json_mode: bool = False):
     client = get_openai_client()
     if client is None: # Verifica si el cliente es None
-        return {"error": "API Key de OpenAI no configurada.", "raw_content": "No se pudo conectar a OpenAI."}
+        return {"error": "API Key de OpenAI no configurada o error de inicialización.", "raw_content": "No se pudo conectar a OpenAI."}
 
     params = {"model": "gpt-4o", "messages": [{"role": "user", "content": prompt}], "temperature": 0.5}
     if use_json_mode:
@@ -322,7 +327,7 @@ def render_deliberation_workshop(active_scenario):
         root_question_methodology = (
             f"Para un modelo DEA con enfoque '{active_scenario['selected_proposal'].get('title', 'N/A')}', "
             f"inputs {active_scenario['selected_proposal']['inputs']} y "
-            f"outputs {active_scenario['selected_proposal']['outputs']}, "
+            f"outputs {active_scenario['selected_proposal']['outputs']},"
             "¿cuáles son los principales desafíos metodológicos y las mejores prácticas para asegurar la robustez del análisis?"
         )
         if st.button("Generar Mapa Metodológico", use_container_width=True, key=f"gen_map_{st.session_state.active_scenario_id}"):
