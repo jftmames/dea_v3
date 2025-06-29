@@ -78,6 +78,7 @@ def get_active_scenario():
 
 def initialize_global_state():
     """Inicializa el estado global de la app."""
+    # Solo inicializa si 'scenarios' no existe, lo que permite a reset_all() borrarlo primero.
     if 'scenarios' not in st.session_state:
         st.session_state.scenarios = {}
         st.session_state.active_scenario_id = None
@@ -85,13 +86,22 @@ def initialize_global_state():
 
 def reset_all():
     """Reinicia la aplicación a su estado inicial, eliminando todos los datos y escenarios."""
+    # Limpiar todas las cachés de funciones para asegurar un estado limpio
     cached_get_analysis_proposals.clear()
     cached_run_dea_analysis.clear()
     cached_run_inquiry_engine.clear()
     cached_explain_tree.clear()
-    cached_generate_candidates.clear() 
-    cached_evaluate_candidates.clear() 
-    initialize_global_state()
+    cached_generate_candidates.clear()
+    cached_evaluate_candidates.clear()
+
+    # Borrar TODAS las claves del session_state para un reseteo completo
+    # Esto es crucial para asegurar que no queden remanentes de sesiones anteriores.
+    st.session_state.clear() 
+
+    # Re-inicializar el estado global básico para que la app pueda arrancar limpia.
+    # initialize_global_state() se llamará en la siguiente ejecución del script
+    # y creará las estructuras iniciales de nuevo.
+    pass # No se necesita llamar initialize_global_state() aquí, se ejecutará en la siguiente pasada.
 
 
 # --- 3) FUNCIONES DE CACHÉ Y LÓGICA DE IA ---
@@ -237,7 +247,7 @@ def render_comparison_view():
             help="Selecciona el primer escenario para la comparación."
         )
     with col2:
-        options_b = [sid for sid in st.session_state.scenarios.keys() if sid != id_a] or [id_a] # Ensure at least one option
+        options_b = [sid for sid sid in st.session_state.scenarios.keys() if sid != id_a] or [id_a] # Ensure at least one option
         id_b = st.selectbox(
             "Con Escenario B:", 
             options_b, 
@@ -266,7 +276,7 @@ def render_comparison_view():
                         st.markdown(f"**Inputs Seleccionados:** {sc['selected_proposal'].get('inputs')}")
                         st.markdown(f"**Outputs Seleccionados:** {sc['selected_proposal'].get('outputs')}")
                     st.markdown("**Primeras 5 Filas de Resultados:**")
-                    st.dataframe(sc['dea_results']['main_df']) # REMOVED: help argument
+                    st.dataframe(sc['dea_results']['main_df']) 
                     if sc.get('inquiry_tree'):
                         eee_metrics = compute_eee(sc['inquiry_tree'], depth_limit=3, breadth_limit=5)
                         st.metric("Calidad del Juicio (EEE)", f"{eee_metrics['score']:.2%}", help="El Índice de Equilibrio Erotético (EEE) mide la profundidad, pluralidad y robustez de tu mapa de razonamiento. Una puntuación más alta indica un análisis metodológico más sólido y deliberado.")
@@ -605,7 +615,7 @@ def render_main_dashboard(active_scenario):
         results = active_scenario["dea_results"]
         st.header(f"Resultados para: {results['model_name']}", divider="blue")
         st.markdown("Aquí puedes explorar los resultados de eficiencia de tus DMUs y las visualizaciones clave. Estos resultados son la base para tu deliberación metodológica y tu informe final.")
-        st.dataframe(results['main_df']) # REMOVED: help argument
+        st.dataframe(results['main_df']) 
         if results.get("charts"):
             st.subheader("Visualizaciones de Resultados")
             st.markdown("Los gráficos te ayudarán a entender la distribución de la eficiencia y otras relaciones importantes en tus datos.")
@@ -911,15 +921,15 @@ def render_dea_challenges_tab():
 # --- 6) FLUJO PRINCIPAL DE LA APLICACIÓN ---
 def main():
     """Función principal que orquesta la aplicación multi-escenario."""
-    if 'scenarios' not in st.session_state:
-        initialize_global_state()
+    # initialize_global_state() debe ser lo primero en main() para asegurar que st.session_state está configurado
+    initialize_global_state() 
 
     st.sidebar.image("https://i.imgur.com/8y0N5c5.png", width=200)
     st.sidebar.title("DEA Deliberative Modeler")
     st.sidebar.markdown("Una herramienta para el análisis de eficiencia y la deliberación metodológica asistida por IA. Sigue los pasos para un estudio DEA robusto.")
     if st.sidebar.button("🔴 Empezar Nueva Sesión", help="Borra todos los datos y escenarios actuales para empezar un análisis desde cero. ¡Cuidado, esta acción no se puede deshacer!"):
         reset_all()
-        st.rerun()
+        st.rerun() # Esto recarga la página completamente después del reseteo
     st.sidebar.divider()
     
     render_scenario_navigator()
@@ -927,7 +937,8 @@ def main():
     st.sidebar.markdown("---")
     st.sidebar.info("Una herramienta para el análisis de eficiencia y la deliberación metodológica asistida por IA.")
 
-    active_scenario = get_active_scenario()
+    # El active_scenario se obtiene DESPUÉS de que initialize_global_state haya configurado las bases.
+    active_scenario = get_active_scenario() 
 
     if not active_scenario:
         render_upload_step()
