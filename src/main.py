@@ -4,14 +4,14 @@ import pandas as pd
 import streamlit as st
 import io
 import json
-import uuid
-from openai import OpenAI
+import uuid # Asegúrate de que uuid esté importado
+
 
 # --- 0) AJUSTE DEL PYTHONPATH Y CONFIGURACIÓN INICIAL ---
 # Asegura que los módulos locales se puedan importar correctamente.
 script_dir = os.path.dirname(__file__)
 if script_dir not in sys.path:
-    sys.path.insert(0, script_dir)
+    sys.sys.path.insert(0, script_dir)
 
 # Configuración de la página de Streamlit. "wide" aprovecha mejor el espacio.
 st.set_page_config(layout="wide", page_title="DEA Deliberative Modeler")
@@ -29,11 +29,11 @@ from openai_helpers import explain_inquiry_tree
 
 # --- 2) GESTIÓN DE ESTADO MULTI-ESCENARIO ---
 # Este es el núcleo de la refactorización. Se pasa de un estado único
-# a una gestión de múltiples escenarios de análisis.
+# a una gestión de múltiples escenarios.
 
 def create_new_scenario(name: str = "Modelo Base", source_scenario_id: str = None):
     """Crea un nuevo escenario, ya sea en blanco o clonando uno existente."""
-    new_id = str(uuid.uniform(0, 1) * 1000000000) # Use a float for the key, as UUID is not always suitable for non-string IDs
+    new_id = str(uuid.uuid4()) # Correcto: generar un UUID como string
     
     # Si se proporciona un escenario fuente, clónalo.
     if source_scenario_id and source_scenario_id in st.session_state.scenarios:
@@ -409,7 +409,7 @@ def render_optimization_workshop(active_scenario):
                     chosen_candidate = active_scenario['optimization_evaluations'].loc[selected_candidate_index]
                     
                     new_scenario_name = f"Optimizado - {active_scenario['name']} (Candidato {selected_candidate_index+1})"
-                    new_id = str(uuid.uniform(0, 1) * 1000000000)
+                    new_id = str(uuid.uuid4()) # Corregido: generar un UUID como string
 
                     st.session_state.scenarios[new_id] = {
                         "name": new_scenario_name,
@@ -540,6 +540,9 @@ def render_main_dashboard(active_scenario):
             
             # Validar antes de ejecutar
             validation_results = validate_data(df, proposal.get('inputs', []), proposal.get('outputs', []))
+            # Almacenar los resultados de la validación LLM en data_overview para el reporte
+            active_scenario['data_overview']['llm_validation_results'] = validation_results
+            
             if validation_results['formal_issues']:
                 for issue in validation_results['formal_issues']:
                     st.error(f"Error de validación formal: {issue}")
@@ -583,6 +586,8 @@ def render_validation_step(active_scenario):
 
     with st.spinner("La IA está validando la coherencia de los datos y el modelo..."):
         validation_results = validate_data(active_scenario['df'], proposal['inputs'], proposal['outputs'])
+        # Almacenar los resultados de la validación LLM en data_overview para el reporte
+        active_scenario['data_overview']['llm_validation_results'] = validation_results
     
     if validation_results['formal_issues']:
         st.error("**Reto de Datos: Datos Problemáticos.** Se encontraron problemas de validación formal en los datos o columnas seleccionadas. El DEA requiere que los inputs y outputs sean positivos. La presencia de valores nulos, negativos o cero, o columnas no numéricas, puede causar errores o resultados inválidos.")
@@ -725,7 +730,13 @@ def render_upload_step():
         
         st.session_state.global_df = df
         
-        # Guardar un resumen de los datos para el reporte
+        # --- NUEVO ORDEN LÓGICO ---
+        # 1. Crear el nuevo escenario para que active_scenario_id esté disponible
+        create_new_scenario(name="Modelo Base") 
+        # 2. Obtener el escenario activo (que acabamos de crear)
+        active_scenario = get_active_scenario() 
+
+        # 3. Calcular y almacenar el data_overview en el escenario activo
         data_overview = {
             "shape": df.shape,
             "column_types": df.dtypes.astype(str).to_dict(),
@@ -744,17 +755,17 @@ def render_upload_step():
         # Check for non-numeric values in supposedly numeric columns (after initial load)
         for col in df.columns:
             if not pd.api.types.is_numeric_dtype(df[col]) and not df[col].isnull().all():
-                 # Check if the column contains non-numeric values, not just if it's already a numeric type
-                if pd.to_numeric(df[col], errors='coerce').isnull().any() and not df[col].isnull().all():
+                # Realizar una conversión forzada para identificar no-numéricos que no son nulos
+                if pd.to_numeric(df[col], errors='coerce').isnull().any() and df[col].notnull().any():
                     data_overview["non_numeric_issues"][col] = True
 
-        st.session_state.scenarios[st.session_state.active_scenario_id]['data_overview'] = data_overview # Store in active scenario
-
-        create_new_scenario(name="Modelo Base")
-        st.rerun()
+        active_scenario['data_overview'] = data_overview # Store in active scenario
+        
+        st.rerun() # Disparar un rerun para que el estado se actualice y se muestren los siguientes pasos
     
+    # Esta parte se muestra después de que el archivo se ha cargado y hay un escenario activo.
     if st.session_state.get('global_df') is not None:
-        active_scenario = get_active_scenario()
+        active_scenario = get_active_scenario() # Necesario re-obtenerlo después del rerun/actualización
         if active_scenario and active_scenario.get('data_overview'):
             data_overview = active_scenario['data_overview']
             
@@ -763,17 +774,22 @@ def render_upload_step():
                 st.write(f"Filas: {data_overview['shape'][0]}, Columnas: {data_overview['shape'][1]}")
 
                 st.subheader("Tipos de Datos por Columna:")
-                st.dataframe(pd.Series(data_overview['column_types']).rename("Tipo de Dato"))
+                # Convertir a DataFrame para mejor visualización
+                df_types = pd.DataFrame(data_overview['column_types'].items(), columns=['Columna', 'Tipo de Dato'])
+                st.dataframe(df_types, hide_index=True)
 
                 st.subheader("Resumen Estadístico (Columnas Numéricas):")
-                st.dataframe(pd.DataFrame(data_overview['numerical_summary']))
+                # El resumen numérico ya está en formato dict, convertirlo a DataFrame
+                df_numerical_summary = pd.DataFrame(data_overview['numerical_summary'])
+                st.dataframe(df_numerical_summary)
 
                 st.subheader("Problemas Potenciales de Datos:")
                 issues_found = False
 
                 if any(data_overview['null_counts'].values()):
                     st.warning("⛔ Valores Nulos Detectados:")
-                    st.dataframe(pd.Series(data_overview['null_counts'])[pd.Series(data_overview['null_counts']) > 0].rename("Cantidad de Nulos"))
+                    df_nulls = pd.Series(data_overview['null_counts'])[pd.Series(data_overview['null_counts']) > 0].rename("Cantidad de Nulos")
+                    st.dataframe(df_nulls.reset_index().rename(columns={'index': 'Columna'}), hide_index=True)
                     issues_found = True
 
                 if data_overview['non_numeric_issues']:
@@ -784,7 +800,8 @@ def render_upload_step():
                 
                 if data_overview['zero_negative_counts']:
                     st.warning("⚠️ Columnas Numéricas con Ceros o Valores Negativos:")
-                    st.dataframe(pd.Series(data_overview['zero_negative_counts']).rename("Cantidad (Cero/Negativo)"))
+                    df_zero_neg = pd.Series(data_overview['zero_negative_counts'])[pd.Series(data_overview['zero_negative_counts']) > 0].rename("Cantidad (Cero/Negativo)")
+                    st.dataframe(df_zero_neg.reset_index().rename(columns={'index': 'Columna'}), hide_index=True)
                     st.info("El DEA tradicionalmente requiere valores positivos. Estos datos necesitarán atención en los pasos de validación y modelo.")
                     issues_found = True
                 
@@ -885,5 +902,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 
