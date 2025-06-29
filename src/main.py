@@ -48,7 +48,8 @@ def create_new_scenario(name: str = "Modelo Base", source_scenario_id: str = Non
             st.session_state.scenarios[new_id]['inquiry_tree'] = st.session_state.scenarios[source_scenario_id]['inquiry_tree'].copy()
         # Resetear justificaciones para que el usuario las rellene en el nuevo contexto si es un clon para ajuste
         st.session_state.scenarios[new_id]['user_justifications'] = {} 
-        st.session_state.scenarios[new_id]['app_status'] = "data_loaded" # Revertir a la exploración de datos
+        # Estado de la app para el nuevo escenario, depende de si se clonó un DF o no.
+        st.session_state.scenarios[new_id]['app_status'] = "data_loaded" if st.session_state.get("global_df") is not None else "initial"
         st.session_state.scenarios[new_id]['dea_results'] = None # Forzar re-ejecución
         st.session_state.scenarios[new_id]['inquiry_tree'] = None # Forzar re-generación de árbol
     else:
@@ -799,34 +800,33 @@ def main():
 
     active_scenario = get_active_scenario() 
 
-    if not active_scenario:
-        render_upload_step()
-    else:
-        # Los tabs ahora incluyen el nuevo paso 1b
-        analysis_tab, comparison_tab, challenges_tab = st.tabs([
-            "Análisis del Escenario Activo", 
-            "Comparar Escenarios", 
-            "Retos del DEA"
-        ])
+    # Se usa una lógica de estados más explícita para controlar qué función de renderizado se llama
+    # dentro del tab principal, dependiendo del progreso del usuario.
+    analysis_tab, comparison_tab, challenges_tab = st.tabs([
+        "Análisis del Escenario Activo", 
+        "Comparar Escenarios", 
+        "Retos del DEA"
+    ])
 
-        with analysis_tab:
-            app_status = active_scenario.get('app_status', 'initial')
-            if app_status == "initial": # Archivo no cargado aún
-                render_upload_step()
-            elif app_status == "data_loaded": # Archivo cargado, mostrar exploración preliminar
-                render_preliminary_analysis_step(active_scenario)
-            elif app_status == "file_loaded": # Después de exploración, para elegir enfoque
-                render_proposal_step(active_scenario)
-            elif app_status == "proposal_selected": # Propuesta elegida, ir a validación
-                render_validation_step(active_scenario)
-            elif app_status in ["validated", "results_ready"]: # Validado, ir al dashboard principal
-                render_main_dashboard(active_scenario)
-        
-        with comparison_tab:
-            render_comparison_view()
-        
-        with challenges_tab:
-            render_dea_challenges_tab()
+    with analysis_tab:
+        app_status = active_scenario.get('app_status', 'initial') if active_scenario else 'initial'
+
+        if app_status == "initial":
+            render_upload_step()
+        elif app_status == "data_loaded":
+            render_preliminary_analysis_step(active_scenario)
+        elif app_status == "file_loaded": # Este estado se usa después de la exploración, para ir a la propuesta
+            render_proposal_step(active_scenario)
+        elif app_status == "proposal_selected":
+            render_validation_step(active_scenario)
+        elif app_status in ["validated", "results_ready"]:
+            render_main_dashboard(active_scenario)
+    
+    with comparison_tab:
+        render_comparison_view()
+    
+    with challenges_tab:
+        render_dea_challenges_tab()
 
 
 if __name__ == "__main__":
