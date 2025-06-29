@@ -16,7 +16,7 @@ if script_dir not in sys.path:
 # Configuración de la página de Streamlit. "wide" aprovecha mejor el espacio.
 st.set_page_config(layout="wide", page_title="DEA Deliberative Modeler")
 
-# --- 1) IMPORTACIONES DE MÓDULOS ---
+# --- 1) IMPORTACIONES DE MÓDULOS DEL PROYECTO ---
 from analysis_dispatcher import execute_analysis
 from inquiry_engine import generate_inquiry, to_plotly_tree
 from epistemic_metrics import compute_eee
@@ -26,7 +26,7 @@ from dea_models.visualizations import plot_hypothesis_distribution, plot_correla
 from dea_models.auto_tuner import generate_candidates, evaluate_candidates 
 from openai_helpers import explain_inquiry_tree
 
-# --- 2) GESTIÓN DE ESTADO MULTI-ESCENARIO (Funciones Auxiliares) ---
+# --- 2) GESTIÓN DE ESTADO MULTI-ESCENARIO (Funciones Auxiliares de Lógica de Negocio/Estado) ---
 
 def create_new_scenario(name: str = "Modelo Base", source_scenario_id: str = None):
     """Crea un nuevo escenario, ya sea en blanco o clonando uno existente."""
@@ -88,7 +88,7 @@ def reset_all():
     pass 
 
 
-# --- 3) FUNCIONES DE CACHÉ Y LÓGICA DE IA ---
+# --- 3) FUNCIONES DE CACHÉ Y LÓGICA DE IA (Auxiliares) ---
 
 @st.cache_data
 def cached_get_analysis_proposals(_df):
@@ -161,8 +161,10 @@ def generate_analysis_proposals(df_columns: list[str], df_head: pd.DataFrame):
     except Exception as e:
         return {"error": f"Error al procesar la respuesta de la IA: {str(e)}", "raw_content": content}
 
+
 # --- FUNCIONES DE RENDERIZADO DE LA UI ---
-# Todas las funciones de renderizado se definen aquí, antes de main().
+# TODAS las funciones de renderizado se definen AQUÍ, antes del bloque principal de ejecución.
+# Esto es CRÍTICO para resolver los NameError.
 
 def render_scenario_navigator():
     st.sidebar.title("Navegador de Escenarios")
@@ -875,7 +877,7 @@ def render_dea_challenges_tab():
     * **La aplicación ayuda:** El **Paso 4 (Taller de Auditoría)** y los informes generados están diseñados para ayudar al investigador a deliberar, justificar y documentar la interpretación de los resultados, transformando el análisis cuantitativo en conocimiento accionable.
     """)
 
-# --- FLUJO PRINCIPAL DE LA APLICACIÓN ---
+# --- FUNCIÓN PRINCIPAL DE LA APLICACIÓN ---
 def main():
     """Función principal que orquesta la aplicación multi-escenario."""
     initialize_global_state() 
@@ -888,15 +890,13 @@ def main():
         st.rerun() 
     st.sidebar.divider()
     
-    render_scenario_navigator()
+    render_scenario_navigator() # Llamada a la función de renderizado de la barra lateral
 
     st.sidebar.markdown("---")
     st.sidebar.info("Una herramienta para el análisis de eficiencia y la deliberación metodológica asistida por IA.")
 
     active_scenario = get_active_scenario() 
 
-    # Se usa una lógica de estados más explícita para controlar qué función de renderizado se llama
-    # dentro del tab principal, dependiendo del progreso del usuario.
     # Los tabs se definen una sola vez en el ámbito principal.
     analysis_tab, comparison_tab, challenges_tab = st.tabs([
         "Análisis del Escenario Activo", 
@@ -905,6 +905,7 @@ def main():
     ])
 
     with analysis_tab:
+        # La lógica de estados determina qué parte del flujo se renderiza en este tab.
         app_status = active_scenario.get('app_status', 'initial') if active_scenario else 'initial'
 
         if app_status == "initial":
