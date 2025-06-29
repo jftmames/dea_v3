@@ -165,7 +165,7 @@ def generate_analysis_proposals(df_columns: list[str], df_head: pd.DataFrame):
     except Exception as e:
         return {"error": f"Error al procesar la respuesta de la IA: {str(e)}", "raw_content": content}
 
-# --- FUNCIONES DE RENDERIZADO DE LA UI (Definidas antes de main()) ---
+# --- FUNCIONES DE RENDERIZADO DE LA UI (Definidas aquí, antes de main()) ---
 
 def render_scenario_navigator():
     st.sidebar.title("Navegador de Escenarios")
@@ -629,13 +629,11 @@ def render_preliminary_analysis_step(active_scenario):
         return
 
     # Store charts in data_overview for reporting
-    # No es necesario re-calcular si ya están en el caché del escenario
     if 'preliminary_analysis_charts' not in active_scenario['data_overview']:
         active_scenario['data_overview']['preliminary_analysis_charts'] = {}
     
-    # Recalcular la matriz de correlación si no existe o si se ha actualizado el DF global
     if 'correlation_matrix' not in active_scenario['data_overview'] or \
-       active_scenario['data_overview'].get('last_df_hash') != hash(df.to_numpy().tobytes()): # Simple hash check
+       active_scenario['data_overview'].get('last_df_hash') != hash(df.to_numpy().tobytes()): 
         active_scenario['data_overview']['correlation_matrix'] = df[numerical_cols].corr().to_dict()
         active_scenario['data_overview']['last_df_hash'] = hash(df.to_numpy().tobytes())
 
@@ -655,17 +653,15 @@ def render_preliminary_analysis_step(active_scenario):
                            labels={col: col}, 
                            template="plotly_white")
         st.plotly_chart(fig, use_container_width=True, key=f"hist_{col}_{st.session_state.active_scenario_id}", help=f"Histograma de la columna '{col}'. Observa la forma de la distribución, si es simétrica, sesgada, o si hay valores atípicos.")
-        # Guardar la figura como JSON para el reporte
         active_scenario['data_overview']['preliminary_analysis_charts']['histograms'][col] = fig.to_json()
 
 
     st.subheader("3. Matriz de Correlación (Mapa de Calor):", anchor=False)
     st.markdown("Examina las relaciones lineales entre tus variables numéricas. Una alta correlación entre inputs o entre outputs puede indicar **multicolinealidad**, un reto potencial en DEA.")
     
-    # Recuperar la matriz de correlación del estado si ya existe
     corr_matrix_dict = active_scenario['data_overview'].get('correlation_matrix', {})
     if corr_matrix_dict:
-        corr_matrix = pd.DataFrame(corr_matrix_dict) # Reconstruir DataFrame desde el dict guardado
+        corr_matrix = pd.DataFrame(corr_matrix_dict) 
         fig_corr = px.imshow(corr_matrix, 
                             text_auto=True, 
                             aspect="auto",
@@ -689,7 +685,7 @@ def render_preliminary_analysis_step(active_scenario):
     """)
 
     if st.button("Proceder al Paso 2: Elegir Enfoque de Análisis", type="primary", use_container_width=True, help="Haz clic aquí para continuar y aplicar las ideas de esta exploración inicial a la selección de tus variables DEA."):
-        active_scenario['app_status'] = "file_loaded" # Mueve al siguiente estado para la selección de variables
+        active_scenario['app_status'] = "file_loaded" 
         st.rerun()
 
 def render_validation_step(active_scenario):
@@ -795,6 +791,7 @@ def main():
 
     # Se usa una lógica de estados más explícita para controlar qué función de renderizado se llama
     # dentro del tab principal, dependiendo del progreso del usuario.
+    # Los tabs se definen una sola vez en el ámbito principal.
     analysis_tab, comparison_tab, challenges_tab = st.tabs([
         "Análisis del Escenario Activo", 
         "Comparar Escenarios", 
@@ -808,7 +805,7 @@ def main():
             render_upload_step()
         elif app_status == "data_loaded":
             render_preliminary_analysis_step(active_scenario)
-        elif app_status == "file_loaded": # Este estado se usa después de la exploración, para elegir enfoque
+        elif app_status == "file_loaded": 
             render_proposal_step(active_scenario)
         elif app_status == "proposal_selected":
             render_validation_step(active_scenario)
