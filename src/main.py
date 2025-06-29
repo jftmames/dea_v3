@@ -6,6 +6,7 @@ import io
 import json
 import uuid 
 import openai 
+import plotly.express as px # Importar plotly.express para gráficos exploratorios
 
 # --- 0) AJUSTE DEL PYTHONPATH Y CONFIGURACIÓN INICIAL ---
 # Asegura que los módulos locales se puedan importar correctamente.
@@ -47,7 +48,7 @@ def create_new_scenario(name: str = "Modelo Base", source_scenario_id: str = Non
             st.session_state.scenarios[new_id]['inquiry_tree'] = st.session_state.scenarios[source_scenario_id]['inquiry_tree'].copy()
         # Resetear justificaciones para que el usuario las rellene en el nuevo contexto si es un clon para ajuste
         st.session_state.scenarios[new_id]['user_justifications'] = {} 
-        st.session_state.scenarios[new_id]['app_status'] = "file_loaded" # Revertir a la selección de propuesta
+        st.session_state.scenarios[new_id]['app_status'] = "data_loaded" # Revertir a la exploración de datos
         st.session_state.scenarios[new_id]['dea_results'] = None # Forzar re-ejecución
         st.session_state.scenarios[new_id]['inquiry_tree'] = None # Forzar re-generación de árbol
     else:
@@ -55,7 +56,7 @@ def create_new_scenario(name: str = "Modelo Base", source_scenario_id: str = Non
         st.session_state.scenarios[new_id] = {
             "name": name,
             "df": st.session_state.get("global_df", None), 
-            "app_status": "file_loaded" if st.session_state.get("global_df") is not None else "initial",
+            "app_status": "initial", # Estado inicial, se actualiza a data_loaded al subir archivo
             "proposals_data": None,
             "selected_proposal": None,
             "dea_config": {},
@@ -240,7 +241,6 @@ def render_comparison_view():
             help="Selecciona el primer escenario para la comparación."
         )
     with col2:
-        # CORRECCIÓN: sid in st.session_state.scenarios.keys()
         options_b = [sid for sid in st.session_state.scenarios.keys() if sid != id_a] or [id_a] 
         id_b = st.selectbox(
             "Con Escenario B:", 
@@ -512,7 +512,7 @@ def render_main_dashboard(active_scenario):
     st.markdown("En este paso, configurarás y ejecutarás el modelo DEA. Asegúrate de que los inputs y outputs seleccionados sean los correctos y de que la elección del modelo se alinee con los objetivos de tu análisis.")
     
     st.markdown("---")
-    st.subheader("Configuración Actual de Inputs y Outputs:")
+    st.subheader("Configuración Actual de Inputs y Outputs:", anchor=False)
     st.markdown("Verifica y, si es necesario, ajusta los inputs (recursos consumidos) y outputs (productos generados) para tu modelo DEA. Estos fueron definidos en el Paso 2 o seleccionados de una propuesta de la IA.")
     col_inputs, col_outputs = st.columns(2)
     with col_inputs:
@@ -619,6 +619,72 @@ def render_main_dashboard(active_scenario):
         render_deliberation_workshop(active_scenario)
         render_optimization_workshop(active_scenario)
         render_download_section(active_scenario)
+
+def render_preliminary_analysis_step(active_scenario):
+    st.header(f"Paso 1b: Exploración Preliminar de Datos para '{active_scenario['name']}'", divider="blue")
+    st.info("Este paso es crucial para **entender tus datos** antes de realizar el análisis DEA. Te ayudará a identificar posibles problemas (como outliers o multicolinealidad) y a tomar decisiones informadas sobre la selección de inputs y outputs. La visualización es clave para el **pensamiento crítico** aquí.")
+
+    df = active_scenario['df']
+    numerical_cols = df.select_dtypes(include=['number']).columns.tolist()
+
+    if not numerical_cols:
+        st.warning("No se encontraron columnas numéricas para realizar el análisis exploratorio. Asegúrate de que tu archivo CSV contenga datos numéricos.")
+        if st.button("Proceder al Paso 2: Elegir Enfoque", key=f"proceed_to_step2_no_numeric_{st.session_state.active_scenario_id}"):
+            active_scenario['app_status'] = "file_loaded"
+            st.rerun()
+        return
+
+    # Store charts in data_overview for reporting
+    if 'preliminary_analysis_charts' not in active_scenario['data_overview']:
+        active_scenario['data_overview']['preliminary_analysis_charts'] = {}
+    if 'correlation_matrix' not in active_scenario['data_overview']:
+        active_scenario['data_overview']['correlation_matrix'] = df[numerical_cols].corr().to_dict() # Store as dict for JSON serializability
+
+    st.subheader("1. Estadísticas Descriptivas:", anchor=False)
+    st.markdown("Un resumen rápido de las características centrales, dispersión y forma de tus datos numéricos.")
+    st.dataframe(df[numerical_cols].describe().T, help="Estadísticas descriptivas para todas las columnas numéricas: conteo, media, desviación estándar, valores mínimos y máximos, y cuartiles. Esto te da una primera idea de la distribución de tus variables.")
+
+    st.subheader("2. Distribución de Variables (Histogramas):", anchor=False)
+    st.markdown("Visualiza la distribución de cada variable numérica. Esto te ayuda a identificar asimetrías, rangos de valores y la presencia de posibles outliers.")
+    
+    if 'histograms' not in active_scenario['data_overview']['preliminary_analysis_charts']:
+        active_scenario['data_overview']['preliminary_analysis_charts']['histograms'] = {}
+
+    for col in numerical_cols:
+        fig = px.histogram(df, x=col, title=f"Distribución de {col}", 
+                           labels={col: col}, 
+                           template="plotly_white")
+        st.plotly_chart(fig, use_container_width=True, key=f"hist_{col}_{st.session_state.active_scenario_id}", help=f"Histograma de la columna '{col}'. Observa la forma de la distribución, si es simétrica, sesgada, o si hay valores atípicos.")
+        active_scenario['data_overview']['preliminary_analysis_charts']['histograms'][col] = fig.to_json()
+
+
+    st.subheader("3. Matriz de Correlación (Mapa de Calor):", anchor=False)
+    st.markdown("Examina las relaciones lineales entre tus variables numéricas. Una alta correlación entre inputs o entre outputs puede indicar **multicolinealidad**, un reto potencial en DEA.")
+    
+    corr_matrix = df[numerical_cols].corr()
+    fig_corr = px.imshow(corr_matrix, 
+                         text_auto=True, 
+                         aspect="auto",
+                         color_continuous_scale=px.colors.sequential.RdBu,
+                         range_color=[-1,1],
+                         title="Matriz de Correlación entre Variables Numéricas",
+                         labels=dict(color="Correlación"))
+    st.plotly_chart(fig_corr, use_container_width=True, key=f"corr_heatmap_{st.session_state.active_scenario_id}", help="Mapa de calor de la matriz de correlación. Valores cercanos a 1 o -1 indican fuerte correlación. Valores cercanos a 0 indican poca o ninguna correlación lineal. La alta correlación entre inputs u outputs puede indicar multicolinealidad, lo que puede afectar los pesos de las variables en DEA.")
+    
+    st.markdown("---")
+    st.subheader("Conclusiones de la Exploración Preliminar:")
+    st.info("""
+    Después de revisar estas visualizaciones:
+    * **Identifica posibles Outliers:** ¿Hay puntos de datos que parecen muy diferentes del resto en los histogramas? Esto puede afectar la frontera de eficiencia en DEA.
+    * **Evalúa la Multicolinealidad:** En el mapa de calor de correlación, ¿hay pares de inputs o de outputs con correlaciones muy altas (cercanas a 1 o -1)? Si es así, podría ser recomendable elegir solo una de esas variables en el Paso 2 para evitar redundancias y problemas de interpretación en los pesos del DEA.
+    * **Distribución de Datos:** ¿Las distribuciones de tus variables son muy asimétricas? Esto podría influir en la robustez del modelo.
+
+    Utiliza esta información para tomar decisiones más informadas al seleccionar tus inputs y outputs en el siguiente paso.
+    """)
+
+    if st.button("Proceder al Paso 2: Elegir Enfoque de Análisis", type="primary", use_container_width=True, help="Haz clic aquí para continuar y aplicar las ideas de esta exploración inicial a la selección de tus variables DEA."):
+        active_scenario['app_status'] = "file_loaded" # Mueve al siguiente estado para la selección de variables
+        st.rerun()
 
 def render_validation_step(active_scenario):
     st.header(f"Paso 2b: Validación del Modelo para '{active_scenario['name']}'", divider="gray")
@@ -781,7 +847,6 @@ def render_upload_step():
     
     if uploaded_file:
         try:
-            # Intentar decodificar con utf-8, si falla, intentar con latin-1 y separador ;
             df = pd.read_csv(io.StringIO(uploaded_file.getvalue().decode('utf-8')))
         except Exception:
             df = pd.read_csv(io.StringIO(uploaded_file.getvalue().decode('latin-1')), sep=';')
@@ -812,6 +877,7 @@ def render_upload_step():
                     data_overview["non_numeric_issues"][col] = True
 
         active_scenario['data_overview'] = data_overview 
+        active_scenario['app_status'] = "data_loaded" # Transición al nuevo paso de exploración
         
         st.rerun() 
     
@@ -888,8 +954,7 @@ def render_dea_challenges_tab():
     * **Disponibilidad y Calidad de Datos:** Datos incompletos o erróneos pueden invalidar el análisis.
     * **Número de Variables vs. DMUs:** Demasiadas variables para pocas DMUs pueden inflar artificialmente la eficiencia.
     * **Valores Nulos, Negativos y Cero:** Los modelos DEA clásicos requieren datos positivos. Estos valores deben tratarse adecuadamente.
-        * **La aplicación ayuda:** En el **Paso 1**, se ofrece un informe rápido de los datos cargados y una guía de preparación. En el **Paso 2b**, se realizan validaciones formal
-    s para detectar y advertir sobre estos problemas antes del análisis.
+        * **La aplicación ayuda:** En el **Paso 1**, se ofrece un informe rápido de los datos cargados y una guía de preparación. En el **Paso 2b**, se realizan validaciones formales para detectar y advertir sobre estos problemas antes del análisis.
     * **Outliers (Valores Atípicos):** El DEA es sensible a los outliers, que pueden distorsionar la frontera de eficiencia.
     * **Homogeneidad de las DMUs:** Las unidades analizadas deben ser comparables entre sí. Comparar entidades muy dispares lleva a conclusiones erróneas.
         * **La aplicación ayuda:** En el **Paso 2**, se enfatiza la importancia de la homogeneidad, y la IA puede ofrecer sugerencias al respecto.
@@ -916,7 +981,6 @@ def render_dea_challenges_tab():
 # --- 6) FLUJO PRINCIPAL DE LA APLICACIÓN ---
 def main():
     """Función principal que orquesta la aplicación multi-escenario."""
-    # initialize_global_state() debe ser lo primero en main() para asegurar que st.session_state está configurado
     initialize_global_state() 
 
     st.sidebar.image("https://i.imgur.com/8y0N5c5.png", width=200)
@@ -932,18 +996,25 @@ def main():
     st.sidebar.markdown("---")
     st.sidebar.info("Una herramienta para el análisis de eficiencia y la deliberación metodológica asistida por IA.")
 
-    # El active_scenario se obtiene DESPUÉS de que initialize_global_state haya configurado las bases.
     active_scenario = get_active_scenario() 
 
     if not active_scenario:
         render_upload_step()
     else:
-        analysis_tab, comparison_tab, challenges_tab = st.tabs(["Análisis del Escenario Activo", "Comparar Escenarios", "Retos del DEA"])
+        # Añadir el nuevo tab para la exploración preliminar de datos
+        analysis_tab, comparison_tab, challenges_tab, preliminary_data_tab = st.tabs([
+            "Análisis del Escenario Activo", 
+            "Comparar Escenarios", 
+            "Retos del DEA",
+            "Exploración Preliminar de Datos" # Nuevo tab
+        ])
 
         with analysis_tab:
             app_status = active_scenario.get('app_status', 'initial')
-            if app_status == "file_loaded":
+            if app_status == "file_loaded": # Después de carga de archivo, pero antes de exploración
                 render_proposal_step(active_scenario)
+            elif app_status == "data_loaded": # Nuevo estado para la exploración preliminar
+                render_preliminary_analysis_step(active_scenario)
             elif app_status == "proposal_selected":
                 render_validation_step(active_scenario)
             elif app_status in ["validated", "results_ready"]:
@@ -954,6 +1025,13 @@ def main():
         
         with challenges_tab:
             render_dea_challenges_tab()
+
+        with preliminary_data_tab: # Contenido del nuevo tab
+            # Asegurarse de que el df exista antes de intentar renderizar
+            if active_scenario and active_scenario.get('df') is not None:
+                render_preliminary_analysis_step(active_scenario)
+            else:
+                st.info("Por favor, carga un archivo CSV en el 'Paso 1: Carga tus Datos' para ver la exploración preliminar.")
 
 if __name__ == "__main__":
     main()
