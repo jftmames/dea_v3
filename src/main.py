@@ -36,28 +36,22 @@ def create_new_scenario(name: str = "Modelo Base", source_scenario_id: str = Non
     """Crea un nuevo escenario, ya sea en blanco o clonando uno existente."""
     new_id = str(uuid.uuid4()) 
     
-    # Si se proporciona un escenario fuente, clónalo.
     if source_scenario_id and source_scenario_id in st.session_state.scenarios:
-        # Crea una copia profunda del diccionario del escenario fuente.
         st.session_state.scenarios[new_id] = st.session_state.scenarios[source_scenario_id].copy()
         st.session_state.scenarios[new_id]['name'] = f"Copia de {st.session_state.scenarios[source_scenario_id]['name']}"
-        # Asegurarse de que los resultados y el árbol sean "nuevos" en la copia si no son inmutables
         if st.session_state.scenarios[new_id]['dea_results']:
             st.session_state.scenarios[new_id]['dea_results'] = st.session_state.scenarios[source_scenario_id]['dea_results'].copy()
         if st.session_state.scenarios[new_id]['inquiry_tree']:
             st.session_state.scenarios[new_id]['inquiry_tree'] = st.session_state.scenarios[source_scenario_id]['inquiry_tree'].copy()
-        # Resetear justificaciones para que el usuario las rellene en el nuevo contexto si es un clon para ajuste
         st.session_state.scenarios[new_id]['user_justifications'] = {} 
-        # Estado de la app para el nuevo escenario, depende de si se clonó un DF o no.
         st.session_state.scenarios[new_id]['app_status'] = "data_loaded" if st.session_state.get("global_df") is not None else "initial"
-        st.session_state.scenarios[new_id]['dea_results'] = None # Forzar re-ejecución
-        st.session_state.scenarios[new_id]['inquiry_tree'] = None # Forzar re-generación de árbol
+        st.session_state.scenarios[new_id]['dea_results'] = None 
+        st.session_state.scenarios[new_id]['inquiry_tree'] = None 
     else:
-        # Si no, crea un escenario virgen con valores por defecto.
         st.session_state.scenarios[new_id] = {
             "name": name,
             "df": st.session_state.get("global_df", None), 
-            "app_status": "initial", # Estado inicial, se actualiza a data_loaded al subir archivo
+            "app_status": "initial", 
             "proposals_data": None,
             "selected_proposal": None,
             "dea_config": {},
@@ -68,7 +62,6 @@ def create_new_scenario(name: str = "Modelo Base", source_scenario_id: str = Non
             "user_justifications": {}, 
             "data_overview": {} 
         }
-    # Activa el escenario recién creado.
     st.session_state.active_scenario_id = new_id
 
 def get_active_scenario():
@@ -172,7 +165,7 @@ def generate_analysis_proposals(df_columns: list[str], df_head: pd.DataFrame):
     except Exception as e:
         return {"error": f"Error al procesar la respuesta de la IA: {str(e)}", "raw_content": content}
 
-# --- 4) COMPONENTES DE LA UI ---
+# --- FUNCIONES DE RENDERIZADO DE LA UI (Definidas antes de main()) ---
 
 def render_scenario_navigator():
     st.sidebar.title("Navegador de Escenarios")
@@ -815,7 +808,7 @@ def main():
             render_upload_step()
         elif app_status == "data_loaded":
             render_preliminary_analysis_step(active_scenario)
-        elif app_status == "file_loaded": # Este estado se usa después de la exploración, para ir a la propuesta
+        elif app_status == "file_loaded": # Este estado se usa después de la exploración, para elegir enfoque
             render_proposal_step(active_scenario)
         elif app_status == "proposal_selected":
             render_validation_step(active_scenario)
