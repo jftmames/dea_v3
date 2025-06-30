@@ -1,4 +1,4 @@
-# main.py - VERSIÓN FINAL COMPLETA, CORREGIDA Y CON TODAS LAS MEJORAS
+# main.py - VERSIÓN FINAL Y COMPLETA
 import sys
 import os
 import pandas as pd
@@ -57,7 +57,7 @@ def reset_all():
         del st.session_state[key]
     initialize_global_state()
 
-# --- 3) FUNCIONES DE LÓGICA DE IA (SIMULADAS PARA DESARROLLO) ---
+# --- 3) FUNCIONES DE LÓGICA DE IA (SIMULADAS) ---
 
 @st.cache_data
 def cached_run_dea_analysis(_df, dmu_col, input_cols, output_cols, model_key, period_col):
@@ -69,14 +69,12 @@ def cached_run_inquiry_engine(root_question, _context):
 
 @st.cache_data
 def generate_analysis_proposals(df_columns: list[str], df_head: pd.DataFrame):
-    # Función simulada. Reemplazar por la llamada real a la IA.
     proposals = []
     if len(df_columns) > 1:
         proposals.append({"title": "Eficiencia Operativa", "reasoning": "Mide la eficiencia en el uso de recursos básicos.", "inputs": [df_columns[1]], "outputs": [df_columns[-1]]})
     if len(df_columns) > 4:
         proposals.append({"title": "Productividad General", "reasoning": "Analiza la capacidad de generar múltiples outputs desde múltiples inputs.", "inputs": df_columns[1:3], "outputs": df_columns[3:5]})
     return {"proposals": proposals}
-
 
 # --- CLASE ENCAPSULADORA DE LA UI ---
 class AppRenderer:
@@ -87,13 +85,12 @@ class AppRenderer:
         st.header("Paso 1: Cargar Datos", divider="blue")
         source_option = st.radio("Elige una fuente:", ('Usar caso de estudio', 'Subir CSV'), key='data_source', horizontal=True)
         df_to_load, file_name = None, None
-
         if source_option == 'Usar caso de estudio':
             path = os.path.join(script_dir, 'datasets')
             try:
                 datasets = [f for f in os.listdir(path) if f.endswith('.csv')]
                 if not datasets:
-                    st.warning("La carpeta `datasets` está vacía o no se encuentra en `src`."); return
+                    st.warning("Carpeta `datasets` vacía o no encontrada en `src`."); return
                 selected = st.selectbox('Selecciona un caso:', datasets)
                 if selected:
                     df_to_load, file_name = pd.read_csv(os.path.join(path, selected)), selected
@@ -112,8 +109,7 @@ class AppRenderer:
 
     def render_preliminary_analysis_step(self, scenario):
         st.header(f"Paso 1b: Exploración de Datos para '{scenario['name']}'", divider="blue")
-        df = scenario['df']
-        st.dataframe(df.describe())
+        st.dataframe(scenario['df'].describe())
         if st.button("Proceder al Paso 2", type="primary"):
             scenario['app_status'] = "file_loaded"
             st.rerun()
@@ -132,8 +128,8 @@ class AppRenderer:
         cols = [c for c in scenario['df'].columns if scenario['df'][c].dtype in ['int64', 'float64']]
         
         if choice == "Configuración Manual":
-            inputs = st.multiselect("Selecciona Inputs:", options=cols)
-            outputs = st.multiselect("Selecciona Outputs:", options=[c for c in cols if c not in inputs])
+            inputs = st.multiselect("Inputs:", options=cols)
+            outputs = st.multiselect("Outputs:", options=[c for c in cols if c not in inputs])
         else:
             proposal = next((p for p in proposals if p['title'] == choice), None)
             if proposal:
@@ -143,31 +139,25 @@ class AppRenderer:
 
         if st.button("Confirmar Enfoque", type="primary", disabled=(not inputs or not outputs)):
             scenario['selected_proposal'] = {'title': choice, 'inputs': inputs, 'outputs': outputs}
-            scenario['app_status'] = "proposal_selected"
+            scenario['app_status'] = "proposal_selected" # CAMBIO DE ESTADO
             st.rerun()
-            
+
     def render_main_dashboard(self, scenario):
         st.header(f"Paso 3: Configuración y Análisis para '{scenario['name']}'", divider="blue")
         model_key = st.selectbox("Tipo de Modelo DEA:", ["CCR_BCC", "SBM"], key=f"model_{scenario['name']}")
-        scenario['dea_config']['model'] = model_key
+        scenario['dea_config'] = {'model': model_key}
 
-        # --- CHECKLIST DELIBERATIVO INTEGRADO ---
         st.markdown("---")
         with st.expander("Checklist de Buenas Prácticas Metodológicas"):
-            st.info("Este checklist fomenta la autocrítica antes de ejecutar el modelo. Tus respuestas se guardarán en el informe final.")
-            if 'checklist_responses' not in scenario:
-                scenario['checklist_responses'] = {}
-            
-            scenario['checklist_responses']['homogeneity'] = st.checkbox("¿He verificado que las DMUs son suficientemente homogéneas?", key=f"check_homo_{scenario['name']}")
-            
+            if 'checklist_responses' not in scenario: scenario['checklist_responses'] = {}
+            scenario['checklist_responses']['homogeneity'] = st.checkbox("¿DMUs homogéneas?", key=f"check_homo_{scenario['name']}")
             num_dmus = len(scenario['df'])
             num_inputs = len(scenario['selected_proposal'].get('inputs', []))
             num_outputs = len(scenario['selected_proposal'].get('outputs', []))
             rule_value = 3 * (num_inputs + num_outputs)
-            rule_text = f"¿He comprobado la regla empírica? (Nº DMUs ≥ 3 * (Inputs+Outputs)) --- En tu caso: **{num_dmus} ≥ {rule_value}**"
+            rule_text = f"¿Nº DMUs ≥ 3 * (Inputs+Outputs)? --- Tu caso: **{num_dmus} ≥ {rule_value}**"
             scenario['checklist_responses']['rule_of_thumb'] = st.checkbox(rule_text, key=f"check_rule_{scenario['name']}")
-            
-            scenario['checklist_responses']['isotonicity'] = st.checkbox("¿He considerado la isotocidad? (A más inputs, no menos outputs)", key=f"check_iso_{scenario['name']}")
+            scenario['checklist_responses']['isotonicity'] = st.checkbox("¿Relación de isotocinidad verificada?", key=f"check_iso_{scenario['name']}")
         st.markdown("---")
 
         if st.button("Ejecutar Análisis DEA", type="primary", use_container_width=True):
@@ -175,8 +165,7 @@ class AppRenderer:
                 scenario['dea_results'] = cached_run_dea_analysis(
                     scenario['df'], scenario['df'].columns[0],
                     scenario['selected_proposal']['inputs'], scenario['selected_proposal']['outputs'],
-                    model_key, None
-                )
+                    model_key, None)
             scenario['app_status'] = "results_ready"
             st.rerun()
 
@@ -191,7 +180,7 @@ class AppRenderer:
         if st.button("Generar Mapa Metodológico con IA", key=f"gen_map_{scenario['name']}"):
             with st.spinner("IA generando árbol de preguntas..."):
                 context = {"model": scenario['dea_config']['model'], "inputs": scenario['selected_proposal']['inputs'], "outputs": scenario['selected_proposal']['outputs']}
-                tree, error = cached_run_inquiry_engine("Generar un árbol de auditoría metodológica para este análisis DEA", context)
+                tree, error = cached_run_inquiry_engine("Generar árbol de auditoría para este análisis DEA", context)
                 if error: st.error(f"Error al generar mapa: {error}")
                 else: scenario['inquiry_tree'] = tree
         
@@ -218,8 +207,7 @@ def main():
     st.sidebar.divider()
     
     renderer = AppRenderer()
-    # No es necesario llamar a render_scenario_navigator aquí si no se usa
-
+    # No es necesario llamar al navegador de escenarios aquí
     active_scenario = get_active_scenario()
     
     analysis_tab, comparison_tab, challenges_tab = st.tabs(["Análisis Activo", "Comparar", "Retos DEA"])
@@ -228,10 +216,14 @@ def main():
             renderer.render_upload_step()
         else:
             app_status = active_scenario.get('app_status', 'initial')
-            if app_status == "data_loaded": renderer.render_preliminary_analysis_step(active_scenario)
-            elif app_status == "file_loaded": renderer.render_proposal_step(active_scenario)
-            elif app_status in ["proposal_selected", "validated", "results_ready"]: renderer.render_main_dashboard(active_scenario)
-            else: renderer.render_upload_step()
+            if app_status == "data_loaded":
+                renderer.render_preliminary_analysis_step(active_scenario)
+            elif app_status == "file_loaded":
+                renderer.render_proposal_step(active_scenario)
+            elif app_status in ["proposal_selected", "validated", "results_ready"]:
+                renderer.render_main_dashboard(active_scenario)
+            else: # Fallback al estado inicial
+                renderer.render_upload_step()
 
 if __name__ == "__main__":
     main()
