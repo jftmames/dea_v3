@@ -1713,7 +1713,7 @@ def main():
     """Función principal que orquesta la aplicación multi-scenario."""
     initialize_global_state() 
 
-    st.sidebar.image("https://i.imgur.com/8y0N5c5.png", width=200)
+    st.sidebar.image("assets/DEA_logo.png", width=200)
     st.sidebar.title("DEA Deliberative Modeler")
     st.sidebar.markdown("Una herramienta para el análisis de eficiencia y la deliberación metodológica asistida por IA. Sigue los pasos para un estudio DEA robusto.")
     if st.sidebar.button("🔴 Empezar Nueva Sesión", help="Borra todos los datos y escenarios actuales para empezar un análisis desde cero. ¡Cuidado, esta acción no se puede deshacer!"):
