@@ -299,8 +299,7 @@ def main():
     """Función principal que orquesta la aplicación multi-scenario."""
     initialize_global_state()
 
-    # Asegúrate de tener una carpeta "assets" con "logo.png"
-    st.sidebar.image("assets/logo.png", width=200) 
+    st.sidebar.image("assets/DEA_logo.png", width=200) 
     st.sidebar.title("DEA Deliberative Modeler")
     st.sidebar.markdown("Una herramienta para el análisis de eficiencia y la deliberación metodológica asistida por IA.")
     if st.sidebar.button("🔴 Empezar Nueva Sesión"):
