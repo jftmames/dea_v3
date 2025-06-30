@@ -253,7 +253,7 @@ class AppRenderer:
 def main():
     initialize_global_state()
 
-    logo_path = os.path.join(script_dir, 'assets', 'logo.png')
+    logo_path = os.path.join(script_dir, 'assets', 'DEA_logo.png')
     if os.path.exists(logo_path):
         st.sidebar.image(logo_path, width=200)
     else:
