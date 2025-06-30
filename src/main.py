@@ -1,4 +1,4 @@
-# main.py - VERSIÓN FINAL Y COMPLETA
+# main.py - VERSIÓN FINAL, COMPLETA Y FUNCIONAL
 import sys
 import os
 import pandas as pd
@@ -76,6 +76,7 @@ def generate_analysis_proposals(df_columns: list[str], df_head: pd.DataFrame):
         proposals.append({"title": "Productividad General", "reasoning": "Analiza la capacidad de generar múltiples outputs desde múltiples inputs.", "inputs": df_columns[1:3], "outputs": df_columns[3:5]})
     return {"proposals": proposals}
 
+
 # --- CLASE ENCAPSULADORA DE LA UI ---
 class AppRenderer:
     def __init__(self):
@@ -116,7 +117,7 @@ class AppRenderer:
 
     def render_proposal_step(self, scenario):
         st.header(f"Paso 2: Elige un Enfoque de Análisis para '{scenario['name']}'", divider="blue")
-        if not scenario.get('proposals_data'):
+        if 'proposals_data' not in scenario or not scenario['proposals_data']:
             with st.spinner("IA sugiriendo enfoques..."):
                 scenario['proposals_data'] = generate_analysis_proposals(scenario['df'].columns.tolist(), scenario['df'].head())
         
@@ -139,24 +140,26 @@ class AppRenderer:
 
         if st.button("Confirmar Enfoque", type="primary", disabled=(not inputs or not outputs)):
             scenario['selected_proposal'] = {'title': choice, 'inputs': inputs, 'outputs': outputs}
-            scenario['app_status'] = "proposal_selected" # CAMBIO DE ESTADO
+            scenario['app_status'] = "validated" # Pasa a validado
             st.rerun()
 
     def render_main_dashboard(self, scenario):
         st.header(f"Paso 3: Configuración y Análisis para '{scenario['name']}'", divider="blue")
         model_key = st.selectbox("Tipo de Modelo DEA:", ["CCR_BCC", "SBM"], key=f"model_{scenario['name']}")
-        scenario['dea_config'] = {'model': model_key}
+        scenario['dea_config']['model'] = model_key
 
         st.markdown("---")
         with st.expander("Checklist de Buenas Prácticas Metodológicas"):
             if 'checklist_responses' not in scenario: scenario['checklist_responses'] = {}
             scenario['checklist_responses']['homogeneity'] = st.checkbox("¿DMUs homogéneas?", key=f"check_homo_{scenario['name']}")
             num_dmus = len(scenario['df'])
-            num_inputs = len(scenario['selected_proposal'].get('inputs', []))
-            num_outputs = len(scenario['selected_proposal'].get('outputs', []))
-            rule_value = 3 * (num_inputs + num_outputs)
-            rule_text = f"¿Nº DMUs ≥ 3 * (Inputs+Outputs)? --- Tu caso: **{num_dmus} ≥ {rule_value}**"
-            scenario['checklist_responses']['rule_of_thumb'] = st.checkbox(rule_text, key=f"check_rule_{scenario['name']}")
+            # Asegurarse que 'selected_proposal' existe antes de acceder
+            if scenario.get('selected_proposal'):
+                num_inputs = len(scenario['selected_proposal'].get('inputs', []))
+                num_outputs = len(scenario['selected_proposal'].get('outputs', []))
+                rule_value = 3 * (num_inputs + num_outputs)
+                rule_text = f"¿Nº DMUs ≥ 3 * (Inputs+Outputs)? --- Tu caso: **{num_dmus} ≥ {rule_value}**"
+                scenario['checklist_responses']['rule_of_thumb'] = st.checkbox(rule_text, key=f"check_rule_{scenario['name']}")
             scenario['checklist_responses']['isotonicity'] = st.checkbox("¿Relación de isotocinidad verificada?", key=f"check_iso_{scenario['name']}")
         st.markdown("---")
 
@@ -180,12 +183,13 @@ class AppRenderer:
         if st.button("Generar Mapa Metodológico con IA", key=f"gen_map_{scenario['name']}"):
             with st.spinner("IA generando árbol de preguntas..."):
                 context = {"model": scenario['dea_config']['model'], "inputs": scenario['selected_proposal']['inputs'], "outputs": scenario['selected_proposal']['outputs']}
-                tree, error = cached_run_inquiry_engine("Generar árbol de auditoría para este análisis DEA", context)
+                tree, error = cached_run_inquiry_engine("Generar un árbol de auditoría metodológica para este análisis DEA", context)
                 if error: st.error(f"Error al generar mapa: {error}")
                 else: scenario['inquiry_tree'] = tree
         
         if scenario.get("inquiry_tree"):
-            eee_metrics = compute_eee(scenario['inquiry_tree'])
+            # --- LLAMADA CORREGIDA A COMPUTE_EEE ---
+            eee_metrics = compute_eee(scenario['inquiry_tree'], depth_limit=3, breadth_limit=5)
             st.metric("Calidad del Juicio (EEE)", f"{eee_metrics['score']:.2%}")
 
     def render_download_section(self, scenario):
@@ -216,14 +220,11 @@ def main():
             renderer.render_upload_step()
         else:
             app_status = active_scenario.get('app_status', 'initial')
-            if app_status == "data_loaded":
-                renderer.render_preliminary_analysis_step(active_scenario)
-            elif app_status == "file_loaded":
-                renderer.render_proposal_step(active_scenario)
-            elif app_status in ["proposal_selected", "validated", "results_ready"]:
-                renderer.render_main_dashboard(active_scenario)
-            else: # Fallback al estado inicial
-                renderer.render_upload_step()
+            if app_status == "data_loaded": renderer.render_preliminary_analysis_step(active_scenario)
+            elif app_status == "file_loaded": renderer.render_proposal_step(active_scenario)
+            elif app_status == "proposal_selected" or app_status == "validated" or app_status == "results_ready":
+                 renderer.render_main_dashboard(active_scenario)
+            else: renderer.render_upload_step()
 
 if __name__ == "__main__":
     main()
