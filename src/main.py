@@ -1,28 +1,3 @@
-¡Absolutamente\! Entiendo perfectamente. El error que estás viendo es muy común cuando se reestructura el código y es fácil de corregir.
-
-He revisado tu `main.py` y he localizado el problema. No te preocupes, no es necesario cambiar la lógica de la aplicación.
-
-### **Análisis del Error**
-
-El error `AttributeError: 'AppRenderer' object has no attribute 'render_preliminary_analysis_step'` ocurre porque, como sospechábamos, varias funciones de renderizado (`render_...`) se definieron accidentalmente fuera de la clase `AppRenderer`. Cuando la función `main()` intenta llamar a `renderer.render_preliminary_analysis_step()`, no encuentra ese método *dentro* del objeto `renderer` y por eso falla.
-
-### **Solución Aplicada**
-
-He realizado las siguientes correcciones directamente en tu código:
-
-1.  **Reestructuración de `AppRenderer`**: He movido todas las funciones de renderizado (`render_preliminary_analysis_step`, `render_proposal_step`, `render_upload_step`, etc.) para que estén correctamente **dentro** de la clase `AppRenderer`.
-2.  **Eliminación de Duplicados**: He eliminado las definiciones de funciones duplicadas que estaban fuera de la clase para evitar conflictos y confusiones.
-3.  **Integración Limpia**: He mantenido intacta la lógica de la "Mejora 1.1" (Biblioteca de Casos de Estudio) y la he asegurado dentro del método `render_upload_step` corregido.
-
-El resto de tu código (lógica de escenarios, llamadas a la IA, etc.) permanece **sin cambios**.
-
------
-
-### **Código `main.py` Corregido y Completo**
-
-Aquí tienes la versión completa y corregida de tu archivo `main.py`. Simplemente reemplaza todo el contenido de tu archivo con este bloque de código.
-
-```python
 import sys
 import os
 import pandas as pd
@@ -515,4 +490,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-```
