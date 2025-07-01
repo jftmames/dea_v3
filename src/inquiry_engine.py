@@ -1,142 +1,204 @@
-# jftmames/-dea-deliberativo-mvp/src/inquiry_engine.py
-# --- VERSIÓN CORREGIDA ---
+# /src/inquiry_engine.py
+# --- VERSIÓN REFACTORIZADA Y DINÁMICA ---
 
 import os
 import json
+import uuid
 import time
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, List
 from openai import OpenAI
 import plotly.graph_objects as go
 
-# Inicialización del cliente de OpenAI. La clave se lee de las variables de entorno.
+# --- 1. CONFIGURACIÓN DEL CLIENTE (Sin cambios) ---
 try:
     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 except Exception as e:
-    # Manejo de error si la clave no está disponible.
     client = None
     print(f"Advertencia: No se pudo inicializar el cliente de OpenAI. {e}")
 
 
-def to_plotly_tree(tree: Dict[str, Any], title: str = "Árbol de Auditoría Metodológica") -> go.Figure:
+# --- 2. NUEVA CLASE ESTRUCTURAL: InquiryNode ---
+# Reemplaza la estructura de diccionarios por un objeto más robusto y explícito.
+class InquiryNode:
     """
-    Convierte un diccionario anidado en un Treemap interactivo de Plotly.
+    Representa un nodo en el árbol de indagación epistémica.
+    Contiene la pregunta, un prompt para la justificación, y estado para la UI.
     """
-    labels, parents, values = [], [], []
-    if not tree or not isinstance(tree, dict):
-        # Devuelve una figura vacía si el árbol no es válido.
-        return go.Figure(layout={"title": "No hay datos para mostrar en el árbol."})
+    def __init__(self, question: str, justification_prompt: str = "", children: List['InquiryNode'] = None, expanded: bool = False):
+        self.id = str(uuid.uuid4())
+        self.question = question
+        self.justification_prompt = justification_prompt
+        self.children = children if children is not None else []
+        self.expanded = expanded
+        self.justification = "" # Campo para la respuesta del usuario
 
-    # El nodo raíz del árbol.
-    root_label = list(tree.keys())[0]
-    
-    # Función recursiva para recorrer el árbol y construir las listas de Plotly.
-    def walk(node: Dict[str, Any], parent: str):
-        for pregunta, hijos in node.items():
-            if pregunta not in labels:
-                labels.append(pregunta)
-                parents.append(parent)
-                # Asignar un valor base para el tamaño del nodo
-                values.append(10) 
-            
-            if isinstance(hijos, dict):
-                walk(hijos, pregunta)
-            
-    # La raíz no tiene padre en la visualización de Plotly
-    walk({root_label: tree[root_label]}, "")
-    
-    # Creación de la figura del Treemap.
-    fig = go.Figure(go.Treemap(
-        labels=labels,
-        parents=parents,
-        values=values, # Añadimos valores para un mejor hoverinfo
-        root_color="lightgrey",
-        textinfo="label",
-        # --- CORRECCIÓN ---
-        # Se ha cambiado hoverinfo a una combinación válida.
-        # 'label' muestra el nombre del nodo.
-        # 'percent parent' muestra qué porcentaje representa del nodo padre.
-        hoverinfo="label+percent parent" 
-    ))
-    fig.update_layout(
-        title_text=title,
-        title_x=0.5,
-        margin=dict(t=50, l=25, r=25, b=25)
-    )
-    return fig
-
-def generate_inquiry(
-    root_question: str,
-    context: Optional[Dict[str, Any]] = None,
-    max_retries: int = 1
-) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+# --- 3. CLASE PRINCIPAL: InquiryEngine ---
+# Encapsula toda la lógica de generación y expansión del árbol.
+class InquiryEngine:
     """
-    Genera un árbol de preguntas metodológicas usando el LLM en Modo JSON.
+    Motor para generar y gestionar el árbol de indagación metodológica.
     """
-    if not client:
-        # Si el cliente no se pudo inicializar, usa el árbol de respaldo.
-        return _fallback_tree(root_question), "El cliente de OpenAI no está configurado."
+    def __init__(self, llm_client: Optional[OpenAI] = client):
+        self.client = llm_client
 
-    ctx_str = json.dumps(context, indent=2, ensure_ascii=False) if context else "{}"
-    
-    prompt = (
-        "Eres un catedrático de econometría y experto mundial en Análisis Envolvente de Datos (DEA), "
-        "revisando una propuesta de investigación para una revista de primer nivel (Q1).\n"
-        "Tu tarea es generar un **árbol de auditoría metodológica** en formato JSON para evaluar la robustez de la especificación del modelo propuesto.\n\n"
-        f"--- CONTEXTO DEL MODELO PROPUESTO ---\n{ctx_str}\n\n"
-        f"--- PREGUNTA RAÍZ PARA LA AUDITORÍA ---\n{root_question}\n\n"
-        "--- INSTRUCCIONES ESTRICTAS PARA EL ÁRBOL DE AUDITORÍA ---\n"
-        "1. Tu única salida DEBE SER un objeto JSON válido y nada más.\n"
-        "2. El JSON debe tener una única clave raíz 'tree', cuyo valor es el árbol de preguntas.\n"
-        "3. El árbol debe tener entre 2 y 3 niveles de profundidad, descomponiendo los problemas metodológicos clave.\n"
-        "4. Las preguntas deben ser críticas pero constructivas, enfocadas en los siguientes pilares de un buen análisis DEA:\n"
-        "   a. **Justificación Teórica:** ¿Por qué se eligieron estos inputs/outputs y no otros? ¿Se basa en la literatura existente?\n"
-        "   b. **Especificación del Modelo:** ¿La elección de rendimientos a escala (CRS vs. VRS) es adecuada para la muestra? ¿La orientación (input/output) es coherente con el problema?\n"
-        "   c. **Calidad de los Datos:** ¿Cómo se manejarán los outliers, los ceros o los datos negativos? ¿Existe riesgo de multicolinealidad entre las variables?\n"
-        "   d. **Robustez del Análisis:** ¿Qué pruebas de sensibilidad se realizarán para validar los resultados?\n"
-    )
+    def generate_initial_tree(self, context: Optional[Dict[str, Any]] = None) -> Tuple[Optional[InquiryNode], Optional[str]]:
+        """
+        Genera el árbol inicial de preguntas usando el LLM, con prompts de justificación.
+        """
+        if not self.client:
+            return _fallback_tree_node(), "El cliente de OpenAI no está configurado. Se usó un árbol de respaldo."
 
-    for attempt in range(max_retries + 1):
-        if attempt > 0:
-            time.sleep(1)
-        
+        ctx_str = json.dumps(context, indent=2) if context else "{}"
+        prompt = (
+            "Eres un catedrático de econometría y experto en DEA revisando una propuesta para una revista Q1.\n"
+            "Tu tarea es generar un **árbol de auditoría metodológica** en formato JSON.\n\n"
+            f"--- CONTEXTO DEL MODELO PROPUESTO ---\n{ctx_str}\n\n"
+            "--- INSTRUCCIONES ESTRICTAS ---\n"
+            "1. Tu única salida DEBE SER un objeto JSON válido.\n"
+            "2. El JSON debe tener una clave raíz 'question' (la pregunta principal) y una clave 'children' (una lista de nodos hijos).\n"
+            "3. Cada nodo (incluida la raíz y los hijos) DEBE tener dos claves: 'question' (la pregunta) y 'justification_prompt' (una pregunta específica para guiar la justificación del usuario).\n"
+            "4. El árbol debe tener 2-3 niveles de profundidad, descomponiendo problemas metodológicos clave de DEA."
+            """
+            Ejemplo de formato de un nodo:
+            {
+                "question": "¿Qué tipo de rendimientos a escala has asumido?",
+                "justification_prompt": "Fundamenta tu elección (CRS vs VRS). ¿Es razonable suponer que un aumento en los inputs conlleva un aumento proporcional en los outputs para todas las DMUs?",
+                "children": [] 
+            }
+            """
+        )
+
         try:
-            resp = client.chat.completions.create(
+            resp = self.client.chat.completions.create(
                 model="gpt-4o",
                 messages=[{"role": "user", "content": prompt}],
                 response_format={"type": "json_object"},
-                temperature=0.3 + (attempt * 0.2),
+                temperature=0.3,
             )
-            
             response_json = json.loads(resp.choices[0].message.content)
-            tree = response_json.get("tree", {})
             
-            if tree:
-                return {root_question: tree}, None
+            # Función recursiva para construir el árbol de nodos a partir del JSON
+            def build_tree_from_json(data: Dict[str, Any]) -> InquiryNode:
+                node = InquiryNode(
+                    question=data.get("question", "Pregunta no encontrada"),
+                    justification_prompt=data.get("justification_prompt", "Añade tu justificación.")
+                )
+                if "children" in data and data["children"]:
+                    node.children = [build_tree_from_json(child) for child in data["children"]]
+                return node
+
+            root_node = build_tree_from_json(response_json)
+            return root_node, None
 
         except Exception as e:
-            if attempt >= max_retries:
-                return None, f"Fallo la conexión con la API tras {max_retries + 1} intentos. Detalle: {e}"
+            return _fallback_tree_node(), f"Fallo la conexión con la API. Detalle: {e}"
 
-    return _fallback_tree(root_question), "La IA no generó un árbol con la estructura esperada y se ha utilizado un mapa de respaldo."
-
-
-def _fallback_tree(root_q: str) -> Dict[str, Any]:
-    """
-    Árbol de respaldo si la llamada a la IA falla.
-    """
-    return {
-        root_q: {
-            "Validación de la Selección de Variables": {
-                "¿Cuál es la justificación teórica para cada input y output?": {},
-                "¿Se ha comprobado la correlación entre las variables de entrada?": {}
-            },
-            "Adecuación de la Especificación del Modelo": {
-                "¿Por qué se eligieron los rendimientos a escala (CRS/VRS)?": {},
-                "¿La orientación del modelo (input/output) es la correcta?": {}
-            },
-            "Análisis de Robustez": {
-                "¿Cómo se planea tratar los datos atípicos (outliers)?": {},
-                "¿Se realizará algún análisis de sensibilidad sobre los resultados?": {}
+    def expand_question_node(self, question_text: str) -> Tuple[Optional[List[InquiryNode]], Optional[str]]:
+        """
+        Usa el LLM para generar y devolver una lista de sub-nodos para una pregunta dada.
+        """
+        if not self.client:
+            return [], "El cliente de OpenAI no está configurado."
+        
+        prompt = (
+            "Eres un experto en metodología DEA. Dada la siguiente pregunta metodológica, desglósala en 2-3 sub-preguntas más específicas y detalladas.\n"
+            f"Pregunta principal: \"{question_text}\"\n"
+            "--- INSTRUCCIONES ESTRICTAS ---\n"
+            "1. Tu única salida DEBE SER un objeto JSON válido y nada más.\n"
+            "2. El JSON debe contener una única clave 'sub_nodes'.\n"
+            "3. El valor de 'sub_nodes' debe ser una LISTA de objetos, donde cada objeto tiene las claves 'question' y 'justification_prompt'.\n"
+            """
+            Ejemplo de formato de salida:
+            {
+                "sub_nodes": [
+                    { "question": "Sub-pregunta 1", "justification_prompt": "Prompt para la sub-pregunta 1" },
+                    { "question": "Sub-pregunta 2", "justification_prompt": "Prompt para la sub-pregunta 2" }
+                ]
             }
-        }
-    }
+            """
+        )
+        try:
+            resp = self.client.chat.completions.create(
+                model="gpt-4o",
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"},
+                temperature=0.4,
+            )
+            response_json = json.loads(resp.choices[0].message.content)
+            sub_nodes_data = response_json.get("sub_nodes", [])
+            
+            new_nodes = [
+                InquiryNode(
+                    question=data.get("question", "Sub-pregunta inválida"),
+                    justification_prompt=data.get("justification_prompt", "Añade tu justificación.")
+                ) for data in sub_nodes_data
+            ]
+            return new_nodes, None
+        except Exception as e:
+            return [], f"Fallo la expansión de la pregunta. Detalle: {e}"
+
+# --- 4. ÁRBOL DE RESPALDO (ACTUALIZADO A InquiryNode) ---
+def _fallback_tree_node() -> InquiryNode:
+    """Árbol de respaldo si la IA falla, ahora construido con InquiryNode."""
+    return InquiryNode(
+        question="Auditoría Metodológica (Respaldo)",
+        justification_prompt="Describe el propósito general de tu análisis DEA.",
+        children=[
+            InquiryNode(
+                question="Validación de Variables",
+                justification_prompt="¿Cuál es el criterio principal para la selección de variables?",
+                children=[
+                    InquiryNode(question="¿Cuál es la justificación teórica para cada input y output?", justification_prompt="Cita la literatura o la lógica económica detrás de tu elección."),
+                    InquiryNode(question="¿Se ha comprobado la correlación entre variables?", justification_prompt="Describe si has realizado un test de correlación y cómo interpretarías los resultados.")
+                ]
+            ),
+            InquiryNode(
+                question="Especificación del Modelo",
+                justification_prompt="¿Por qué la especificación elegida es la más adecuada?",
+                children=[
+                    InquiryNode(question="¿Por qué se eligieron los rendimientos a escala (CRS/VRS)?", justification_prompt="Argumenta tu elección en función de las características de las DMUs."),
+                ]
+            )
+        ]
+    )
+
+# --- 5. VISUALIZACIÓN (CON CAPA DE COMPATIBILIDAD) ---
+def nodetree_to_dict(node: InquiryNode) -> Dict[str, Any]:
+    """Función de compatibilidad: Convierte un árbol de InquiryNode a un diccionario."""
+    return {node.question: {child.question: nodetree_to_dict(child) for child in node.children}}
+
+def to_plotly_tree(tree_node: InquiryNode, title: str = "Árbol de Auditoría Metodológica") -> go.Figure:
+    """
+    Convierte un árbol de InquiryNode en un Treemap interactivo de Plotly.
+    Utiliza la capa de compatibilidad para no alterar la lógica de Plotly.
+    """
+    if not tree_node:
+        return go.Figure(layout={"title": "No hay datos para mostrar en el árbol."})
+
+    # Convertir el árbol de nodos al formato de diccionario que la función original espera
+    tree_dict = nodetree_to_dict(tree_node)
+    
+    labels, parents, values = [], [], []
+    root_label = list(tree_dict.keys())[0]
+    
+    def walk(node_dict: Dict[str, Any], parent: str):
+        for pregunta, hijos in node_dict.items():
+            if pregunta not in labels:
+                labels.append(pregunta)
+                parents.append(parent)
+                values.append(10)
+            if isinstance(hijos, dict) and hijos:
+                walk(hijos, pregunta)
+
+    walk({root_label: tree_dict[root_label]}, "")
+    
+    fig = go.Figure(go.Treemap(
+        labels=labels,
+        parents=parents,
+        values=values,
+        root_color="lightgrey",
+        textinfo="label",
+        hoverinfo="label+percent parent"
+    ))
+    fig.update_layout(title_text=title, title_x=0.5, margin=dict(t=50, l=25, r=25, b=25))
+    return fig
