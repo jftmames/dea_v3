@@ -1,5 +1,5 @@
 # /src/main.py
-# --- VERSIÓN COMPLETA, FINAL Y ORQUESTADORA ---
+# --- VERSIÓN FINAL CON IMPORTACIONES EXPLÍCITAS ---
 
 import sys
 import os
@@ -20,19 +20,31 @@ from epistemic_metrics import compute_eee
 from data_validator import validate as validate_data
 from openai_helpers import explain_inquiry_tree
 
-# Módulo de gestión de estado
+# Módulo de gestión de estado (importación con *)
 from session_manager import *
 
-# Módulo de componentes de UI
-from ui_components import *
+# --- CORRECCIÓN CLAVE: Importación explícita de componentes de la UI ---
+from ui_components import (
+    render_upload_step,
+    render_scenario_navigator,
+    render_preliminary_analysis_step,
+    render_proposal_step,
+    render_validation_step,
+    render_main_dashboard,
+    render_deliberation_workshop,
+    render_comparison_view,
+    render_dea_challenges_tab
+)
 
 # --- 3) FUNCIONES DE CACHÉ ---
 @st.cache_data
 def cached_run_dea_analysis(_df, dmu_col, inputs, outputs, model, period):
+    """Ejecuta el análisis DEA y cachea el resultado."""
     return execute_analysis(_df.copy(), dmu_col, inputs, outputs, model, period_column=period)
 
 @st.cache_data
 def cached_explain_tree(_tree_node):
+    """Genera una explicación para el árbol de auditoría y la cachea."""
     return explain_inquiry_tree(_tree_node)
 
 # --- 4) FUNCIÓN PRINCIPAL DE LA APLICACIÓN ---
@@ -58,8 +70,7 @@ def main():
         create_new_scenario(source_scenario_id=clone_id)
         st.rerun()
 
-    # Si no hay ningún escenario activo (al inicio o tras borrar todos),
-    # se muestra la pantalla de carga.
+    # Si no hay ningún escenario activo, muestra la pantalla de carga.
     if not active_scenario:
         uploaded_file = render_upload_step()
         if uploaded_file:
@@ -85,20 +96,16 @@ def main():
         if app_status == 'data_loaded':
             render_preliminary_analysis_step(active_scenario)
         elif app_status == 'proposal_selection':
-            # La llamada a esta función ahora debería funcionar correctamente.
             render_proposal_step(active_scenario)
         elif app_status == 'validation':
-            # Asumiendo que render_validation_step existe en ui_components.py
             render_validation_step(active_scenario, validate_data)
         elif app_status == 'analysis':
-            # Asumiendo que render_main_dashboard existe en ui_components.py
             render_main_dashboard(active_scenario, cached_run_dea_analysis, validate_data)
         elif app_status == 'deliberation':
-            # Asumiendo que render_deliberation_workshop existe en ui_components.py
-            render_deliberation_workshop(active_scenario, compute_eee)
-    
+            if active_scenario.get('dea_results'):
+                render_deliberation_workshop(active_scenario, compute_eee)
+
     with comparison_tab:
-        # Asumiendo que render_comparison_view existe en ui_components.py
         render_comparison_view(st.session_state.scenarios, compute_eee)
 
     with challenges_tab:
