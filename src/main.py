@@ -14,12 +14,27 @@ if script_dir not in sys.path:
 st.set_page_config(layout="wide", page_title="DEA Deliberative Modeler")
 
 # --- 2) IMPORTACIONES DE MÓDULOS ---
+# Lógica de negocio
 from analysis_dispatcher import execute_analysis
 from epistemic_metrics import compute_eee
 from data_validator import validate as validate_data
 from openai_helpers import explain_inquiry_tree
+
+# Módulo de gestión de estado (importa todo)
 from session_manager import *
-from ui_components import *
+
+# Módulo de componentes de UI (importación explícita)
+from ui_components import (
+    render_upload_step,
+    render_scenario_navigator,
+    render_preliminary_analysis_step,
+    render_proposal_step,
+    render_validation_step,
+    render_main_dashboard,
+    render_deliberation_workshop,
+    render_comparison_view,
+    render_dea_challenges_tab
+)
 
 # --- 3) FUNCIONES DE CACHÉ ---
 @st.cache_data
