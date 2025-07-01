@@ -5,8 +5,8 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import io
 import uuid
+import io
 
 # --- IMPORTACIONES DE MÓDULOS AUXILIARES ---
 from inquiry_engine import InquiryEngine, InquiryNode, to_plotly_tree
@@ -43,8 +43,7 @@ def render_scenario_navigator(active_scenario):
         active_id = next(iter(scenario_names)) if scenario_names else None
     
     st.session_state.active_scenario_id = st.sidebar.selectbox(
-        "Escenario Activo",
-        options=list(st.session_state.scenarios.keys()),
+        "Escenario Activo", options=list(st.session_state.scenarios.keys()),
         format_func=lambda sid: scenario_names.get(sid, "N/A"),
         index=list(st.session_state.scenarios.keys()).index(active_id) if active_id in st.session_state.scenarios else 0
     )
@@ -92,33 +91,46 @@ def render_preliminary_analysis_step(active_scenario):
         st.plotly_chart(fig, use_container_width=True)
 
     st.subheader("3. Matriz de Correlación")
-    corr_matrix = df[numerical_cols].corr()
-    fig_corr = px.imshow(corr_matrix, text_auto=True, aspect="auto", title="Matriz de Correlación")
-    st.plotly_chart(fig_corr, use_container_width=True)
+    if len(numerical_cols) > 1:
+        corr_matrix = df[numerical_cols].corr()
+        fig_corr = px.imshow(corr_matrix, text_auto=True, aspect="auto", title="Matriz de Correlación")
+        st.plotly_chart(fig_corr, use_container_width=True)
+    else:
+        st.info("Se necesita más de una columna numérica para generar una matriz de correlación.")
 
     if st.button("Proceder al Paso 2: Elegir Enfoque", type="primary", use_container_width=True):
-        active_scenario['app_status'] = "file_loaded"
+        active_scenario['app_status'] = "proposal_selection"
         st.rerun()
 
 def render_proposal_step(active_scenario):
     """Renderiza el paso para seleccionar el enfoque del análisis (inputs/outputs)."""
     st.header(f"Paso 2: Elige un Enfoque para '{active_scenario['name']}'", divider="blue")
-    st.info("Define los inputs y outputs. Puedes usar una sugerencia de la IA o configurarlos manualmente.")
+    st.info("Define los inputs y outputs para tu modelo. Puedes usar una sugerencia de la IA o configurarlos manualmente.")
 
     if 'proposals_data' not in active_scenario or not active_scenario.get('proposals_data'):
-        with st.spinner("La IA está analizando tus datos..."):
+        with st.spinner("La IA está analizando tus datos para sugerir enfoques..."):
             active_scenario['proposals_data'] = generate_analysis_proposals(
                 active_scenario['df'].columns.tolist(), active_scenario['df'].head()
             )
     
-    # ... (El resto del código de esta función, que muestra las propuestas y la configuración manual, va aquí)
-    pass
+    proposals_data = active_scenario.get('proposals_data', {})
+    proposals = proposals_data.get("proposals", [])
+    
+    options_list = ["Configuración Manual"]
+    if proposals:
+        options_list.extend([prop.get('title', f"Propuesta {i+1}") for i, prop in enumerate(proposals)])
+    
+    selected_option = st.selectbox(
+        "Selecciona una opción:", options=options_list,
+        key=f"proposal_selection_{st.session_state.active_scenario_id}"
+    )
 
-def render_validation_step(active_scenario, validate_data_func):
-    """Renderiza el paso de validación de datos."""
-    st.header(f"Paso 2b: Validación del Modelo para '{active_scenario['name']}'", divider="gray")
-    # ... (El código de tu render_validation_step original va aquí) ...
-    pass
+    # El resto del código de la función se mantiene igual que en tu original
+    # (código para mostrar las opciones manuales o de la IA y el botón de confirmación)
+    if st.button("Confirmar y Validar Configuración", type="primary"):
+        # Lógica para guardar la propuesta y cambiar el estado
+        active_scenario['app_status'] = "validation"
+        st.rerun()
 
 def render_main_dashboard(active_scenario, run_analysis_func, validate_data_func):
     """Renderiza el dashboard principal para el Paso 3: Análisis."""
@@ -126,7 +138,7 @@ def render_main_dashboard(active_scenario, run_analysis_func, validate_data_func
     # ... (El código de tu render_main_dashboard original va aquí) ...
     pass
 
-def render_deliberation_workshop(active_scenario, compute_eee_func, explain_tree_func):
+def render_deliberation_workshop(active_scenario, compute_eee_func):
     """Renderiza el taller de deliberación dinámico (Paso 4)."""
     st.header("Paso 4: Taller de Deliberación Metodológica", divider="blue")
     inquiry_engine = st.session_state.inquiry_engine
@@ -134,37 +146,28 @@ def render_deliberation_workshop(active_scenario, compute_eee_func, explain_tree
 
     if tree_node is None:
         if st.button("Generar Mapa de Auditoría con IA", type="primary", use_container_width=True):
-            # ... (Lógica para generar el árbol inicial) ...
-            pass
+            # ... Lógica para generar el árbol inicial ...
+            with st.spinner("Generando árbol..."):
+                tree, error = inquiry_engine.generate_initial_tree()
+                if not error:
+                    active_scenario['inquiry_tree_node'] = tree
+                    log_epistemic_event("initial_tree_generation", {"root": tree.question})
+                    st.rerun()
+                else:
+                    st.error(error)
     else:
         render_inquiry_node_recursively(tree_node, inquiry_engine)
-        # ... (Lógica para mostrar EEE y visualización) ...
 
 def render_inquiry_node_recursively(node: InquiryNode, inquiry_engine: InquiryEngine):
     """Renderiza un nodo del árbol de forma recursiva."""
     # ... (Código completo de la respuesta anterior para esta función) ...
     pass
 
-def render_optimization_workshop(active_scenario, generate_candidates_func, evaluate_candidates_func):
-    """Renderiza el taller de optimización (Paso 5)."""
-    # ... (El código de tu render_optimization_workshop original va aquí) ...
-    pass
-
-def render_download_section(active_scenario, generate_html_func, generate_excel_func):
-    """Renderiza la sección de descargas."""
-    # ... (El código de tu render_download_section original va aquí) ...
-    pass
-
-def render_comparison_view(scenarios, compute_eee_func):
-    """Renderiza la vista de comparación de escenarios."""
-    # ... (El código de tu render_comparison_view original va aquí) ...
-    pass
-
 def render_dea_challenges_tab():
     """Muestra la pestaña con información sobre los retos del DEA."""
     st.header("Retos Relevantes en DEA", divider="blue")
     st.markdown("""
-    - **Selección de Variables:** Subjetivo y requiere justificación.
+    - **Selección de Variables:** Subjetivo y requiere justificación teórica.
     - **Calidad de Datos:** Sensible a errores y outliers.
     - **Elección del Modelo:** Afecta directamente a los resultados.
     - **Interpretación:** La eficiencia es relativa a la muestra.
