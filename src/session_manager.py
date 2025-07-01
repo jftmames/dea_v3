@@ -43,19 +43,16 @@ def create_new_scenario(name: str = "Modelo Base", source_scenario_id: str = Non
     """Crea un nuevo escenario, ya sea en blanco o clonando uno existente."""
     new_id = str(uuid.uuid4())
     
-    # Lógica para clonar un escenario
     if source_scenario_id and source_scenario_id in st.session_state.scenarios:
-        source_scenario = st.session_state.scenarios[source_scenario_id]
-        new_scenario = source_scenario.copy()
-        new_scenario['name'] = f"Copia de {source_scenario['name']}"
-        new_scenario['dea_results'] = None
-        new_scenario['inquiry_tree_node'] = None
-        new_scenario['user_justifications'] = {}
-        st.session_state.scenarios[new_id] = new_scenario
-    # Lógica para crear un escenario nuevo
+        source_scenario = st.session_state.scenarios[source_scenario_id].copy()
+        source_scenario['name'] = f"Copia de {source_scenario['name']}"
+        source_scenario['dea_results'] = None
+        source_scenario['inquiry_tree_node'] = None
+        st.session_state.scenarios[new_id] = source_scenario
     else:
         st.session_state.scenarios[new_id] = {
-            "name": name, "df": st.session_state.get("global_df"), "app_status": "data_loaded",
+            "name": name, "df": st.session_state.get("global_df"),
+            "app_status": "data_loaded",
             "proposals_data": None, "selected_proposal": None, "dea_config": {},
             "dea_results": None, "inquiry_tree_node": None, "tree_explanation": None,
             "user_justifications": {}, "data_overview": {}
