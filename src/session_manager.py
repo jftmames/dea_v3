@@ -42,6 +42,8 @@ def get_active_scenario() -> Optional[Dict[str, Any]]:
 def create_new_scenario(name: str = "Modelo Base", source_scenario_id: str = None):
     """Crea un nuevo escenario, ya sea en blanco o clonando uno existente."""
     new_id = str(uuid.uuid4())
+    
+    # Lógica para clonar un escenario
     if source_scenario_id and source_scenario_id in st.session_state.scenarios:
         source_scenario = st.session_state.scenarios[source_scenario_id]
         new_scenario = source_scenario.copy()
@@ -50,6 +52,7 @@ def create_new_scenario(name: str = "Modelo Base", source_scenario_id: str = Non
         new_scenario['inquiry_tree_node'] = None
         new_scenario['user_justifications'] = {}
         st.session_state.scenarios[new_id] = new_scenario
+    # Lógica para crear un escenario nuevo
     else:
         st.session_state.scenarios[new_id] = {
             "name": name, "df": st.session_state.get("global_df"), "app_status": "data_loaded",
