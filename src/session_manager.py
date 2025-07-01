@@ -1,24 +1,21 @@
 # /src/session_manager.py
-# --- NUEVO ARCHIVO PARA ROMPER LA DEPENDENCIA CIRCULAR ---
+# --- VERSIÓN COMPLETA Y FINAL ---
 
 import streamlit as st
 import uuid
 import datetime
 from typing import Optional, Dict, Any
 
-# Se importa InquiryEngine solo para la inicialización del estado,
-# esto es seguro porque inquiry_engine no depende de nada más.
+# Se importa solo para type hinting y la inicialización, es seguro.
 from inquiry_engine import InquiryEngine
 
 def initialize_global_state():
-    """Inicializa el estado global, incluyendo el motor y el tracker."""
+    """Inicializa el estado global de la sesión si no existe."""
     if 'scenarios' not in st.session_state:
         st.session_state.scenarios = {}
         st.session_state.active_scenario_id = None
         st.session_state.global_df = None
-        # Instancia del motor de indagación
         st.session_state.inquiry_engine = InquiryEngine()
-        # Log para el tracker epistémico
         st.session_state.epistemic_events = []
 
 def log_epistemic_event(event_type: str, data: Dict[str, Any]):
@@ -46,27 +43,26 @@ def create_new_scenario(name: str = "Modelo Base", source_scenario_id: str = Non
     """Crea un nuevo escenario, ya sea en blanco o clonando uno existente."""
     new_id = str(uuid.uuid4())
     
+    # Lógica para clonar un escenario
     if source_scenario_id and source_scenario_id in st.session_state.scenarios:
-        # Lógica de clonación
         source_scenario = st.session_state.scenarios[source_scenario_id]
         new_scenario = source_scenario.copy()
         new_scenario['name'] = f"Copia de {source_scenario['name']}"
-        # Se resetean los resultados y el árbol al clonar para forzar un nuevo análisis
         new_scenario['dea_results'] = None
         new_scenario['inquiry_tree_node'] = None
         new_scenario['user_justifications'] = {}
         st.session_state.scenarios[new_id] = new_scenario
+    # Lógica para crear un escenario nuevo
     else:
-        # Lógica para escenario nuevo
         st.session_state.scenarios[new_id] = {
             "name": name,
             "df": st.session_state.get("global_df"),
-            "app_status": "initial",
+            "app_status": "data_loaded", # Estado inicial tras la carga
             "proposals_data": None,
             "selected_proposal": None,
             "dea_config": {},
             "dea_results": None,
-            "inquiry_tree_node": None, # Nueva clave para el objeto InquiryNode
+            "inquiry_tree_node": None,
             "tree_explanation": None,
             "user_justifications": {},
             "data_overview": {}
@@ -74,10 +70,9 @@ def create_new_scenario(name: str = "Modelo Base", source_scenario_id: str = Non
     st.session_state.active_scenario_id = new_id
 
 def reset_all():
-    """Reinicia la aplicación a su estado inicial."""
+    """Reinicia la aplicación a su estado inicial, borrando todo."""
     st.cache_data.clear()
-    # Limpia todas las claves de la sesión
+    st.cache_resource.clear()
     for key in list(st.session_state.keys()):
         del st.session_state[key]
-    # Re-inicializa el estado base
     initialize_global_state()
