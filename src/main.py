@@ -1,5 +1,5 @@
 # /src/main.py
-# --- VERSIÓN COMPLETA, CORREGIDA Y FINAL ---
+# --- VERSIÓN COMPLETA Y FINAL ---
 
 import sys
 import os
@@ -19,11 +19,9 @@ from analysis_dispatcher import execute_analysis
 from epistemic_metrics import compute_eee
 from data_validator import validate as validate_data
 from openai_helpers import explain_inquiry_tree
-
 # Módulo de gestión de estado
 from session_manager import *
-
-# Módulo de componentes de UI
+# Módulo de componentes de UI (importa todo)
 from ui_components import *
 
 # --- 3) FUNCIONES DE CACHÉ ---
@@ -46,7 +44,8 @@ def main():
         st.rerun()
     st.sidebar.divider()
 
-    render_scenario_navigator()
+    active_scenario = get_active_scenario()
+    render_scenario_navigator(active_scenario)
 
     # Manejar las solicitudes de la UI para crear/clonar escenarios
     if st.session_state.pop('_new_scenario_requested', False):
@@ -56,14 +55,12 @@ def main():
         create_new_scenario(source_scenario_id=clone_id)
         st.rerun()
 
-    active_scenario = get_active_scenario()
-
     if not active_scenario:
         uploaded_file = render_upload_step()
         if uploaded_file:
             try:
                 df = pd.read_csv(io.StringIO(uploaded_file.getvalue().decode('utf-8')))
-            except:
+            except Exception:
                 df = pd.read_csv(io.StringIO(uploaded_file.getvalue().decode('latin-1')), sep=';')
             st.session_state.global_df = df
             create_new_scenario()
@@ -77,23 +74,22 @@ def main():
 
     with analysis_tab:
         app_status = active_scenario.get('app_status', 'data_loaded')
-        # Lógica de flujo de la app
+        
         if app_status == 'data_loaded':
-            # Asumo que esta función existe en tu ui_components.py
             render_preliminary_analysis_step(active_scenario)
         elif app_status == 'file_loaded':
             render_proposal_step(active_scenario)
-        # ... otros estados
+        elif app_status == 'proposal_selected':
+            render_validation_step(active_scenario, validate_data)
         elif app_status in ["validated", "results_ready"]:
+            render_main_dashboard(active_scenario, cached_run_dea_analysis, validate_data)
             if active_scenario.get('dea_results'):
                 render_deliberation_workshop(active_scenario, compute_eee, cached_explain_tree)
 
     with comparison_tab:
-        # Asumo que esta función existe en tu ui_components.py
         render_comparison_view(st.session_state.scenarios, compute_eee)
 
     with challenges_tab:
-        # La llamada ahora es correcta porque la función se importa desde ui_components
         render_dea_challenges_tab()
 
 if __name__ == "__main__":
